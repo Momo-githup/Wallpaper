@@ -15,26 +15,21 @@ public sealed partial class MainViewModel : ObservableObject
     private readonly ImageService _images;
     private readonly IWallpaperEngine _wallpaperEngine;
     private readonly SettingsService _settingsService;
-    private readonly StartupService _startupService;
     private AppSettings _settings = new();
 
     public MainViewModel(LibraryDatabase database, ImageService images, IWallpaperEngine wallpaperEngine,
-        SettingsService settingsService, StartupService startupService)
+        SettingsService settingsService)
     {
         _database = database;
         _images = images;
         _wallpaperEngine = wallpaperEngine;
         _settingsService = settingsService;
-        _startupService = startupService;
     }
 
     public ObservableCollection<WallpaperCardViewModel> Wallpapers { get; } = [];
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(ApplyWallpaperCommand), nameof(RemoveCommand), nameof(PreviewCommand))]
     private WallpaperCardViewModel? selectedWallpaper;
-
-    [ObservableProperty]
-    private bool startWithWindows;
 
     [ObservableProperty]
     private bool isBusy;
@@ -51,7 +46,6 @@ public sealed partial class MainViewModel : ObservableObject
         {
             await _database.InitializeAsync();
             _settings = await _settingsService.LoadAsync();
-            StartWithWindows = _startupService.IsEnabled;
             await ReloadAsync();
             StatusMessage = Wallpapers.Count == 0 ? "导入几张喜欢的图片开始吧" : $"已加载 {Wallpapers.Count} 张壁纸";
         }
@@ -162,22 +156,6 @@ public sealed partial class MainViewModel : ObservableObject
         if (SelectedWallpaper is null || PreviewRequested is null) return;
         var path = await _images.PrepareDisplayFileAsync(SelectedWallpaper.FilePath);
         await PreviewRequested.Invoke(path);
-    }
-
-    [RelayCommand]
-    private async Task SavePreferencesAsync()
-    {
-        try
-        {
-            _startupService.SetEnabled(StartWithWindows);
-            _settings.StartWithWindows = StartWithWindows;
-            await _settingsService.SaveAsync(_settings);
-            StatusMessage = "设置已保存";
-        }
-        catch (Exception exception)
-        {
-            MessageBox.Show(exception.Message, "保存设置失败", MessageBoxButton.OK, MessageBoxImage.Error);
-        }
     }
 
     private async Task ReloadAsync()

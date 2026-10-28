@@ -31,9 +31,8 @@ public class CoreTests
         try
         {
             var service = new SettingsService(new AppPaths(root));
-            await service.SaveAsync(new AppSettings { StartWithWindows = true, CurrentWallpaperPath = "x.jpg" });
+            await service.SaveAsync(new AppSettings { CurrentWallpaperPath = "x.jpg" });
             var loaded = await service.LoadAsync();
-            Assert.True(loaded.StartWithWindows);
             Assert.Equal("x.jpg", loaded.CurrentWallpaperPath);
         }
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }

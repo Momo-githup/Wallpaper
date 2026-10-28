@@ -27,7 +27,8 @@ public partial class App : System.Windows.Application
             args.Handled = true;
         };
         var images = new ImageService(_paths);
-        var viewModel = new MainViewModel(new LibraryDatabase(_paths), images, new StaticWallpaperEngine(images), new SettingsService(_paths), new StartupService());
+        new StartupService().EnsureDisabled();
+        var viewModel = new MainViewModel(new LibraryDatabase(_paths), images, new StaticWallpaperEngine(images), new SettingsService(_paths));
         _mainWindow = new MainWindow(viewModel);
         _mainWindow.Closing += (_, args) =>
         {
@@ -38,7 +39,8 @@ public partial class App : System.Windows.Application
         };
         CreateTrayIcon();
         await viewModel.InitializeAsync();
-        if (!e.Args.Contains("--background", StringComparer.OrdinalIgnoreCase)) { _mainWindow.Show(); _mainWindow.Activate(); }
+        _mainWindow.Show();
+        _mainWindow.Activate();
     }
 
     private void CreateTrayIcon()
