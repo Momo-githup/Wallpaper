@@ -28,7 +28,8 @@ internal sealed class DynamicWallpaperWindow : Window
             Volume = 0,
             Source = new Uri(path, UriKind.Absolute)
         };
-        _player.MediaOpened += (_, _) => { _player.Play(); _opened.TrySetResult(); };
+        _player.Loaded += (_, _) => _player.Play();
+        _player.MediaOpened += (_, _) => _opened.TrySetResult();
         _player.MediaEnded += (_, _) => { _player.Position = TimeSpan.Zero; _player.Play(); };
         _player.MediaFailed += (_, args) => _opened.TrySetException(
             args.ErrorException ?? new InvalidOperationException("Windows 无法播放这个视频。"));
