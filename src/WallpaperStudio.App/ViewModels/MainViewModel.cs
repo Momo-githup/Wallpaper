@@ -29,14 +29,9 @@ public sealed partial class MainViewModel : ObservableObject
     }
 
     public ObservableCollection<WallpaperCardViewModel> Wallpapers { get; } = [];
-    public IReadOnlyList<WallpaperLayout> Layouts { get; } = Enum.GetValues<WallpaperLayout>();
-
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(ApplyWallpaperCommand), nameof(RemoveCommand), nameof(PreviewCommand))]
     private WallpaperCardViewModel? selectedWallpaper;
-
-    [ObservableProperty]
-    private WallpaperLayout selectedLayout = WallpaperLayout.Fill;
 
     [ObservableProperty]
     private bool startWithWindows;
@@ -56,7 +51,6 @@ public sealed partial class MainViewModel : ObservableObject
         {
             await _database.InitializeAsync();
             _settings = await _settingsService.LoadAsync();
-            SelectedLayout = _settings.Layout;
             StartWithWindows = _startupService.IsEnabled;
             await ReloadAsync();
             StatusMessage = Wallpapers.Count == 0 ? "导入几张喜欢的图片开始吧" : $"已加载 {Wallpapers.Count} 张壁纸";
@@ -136,8 +130,7 @@ public sealed partial class MainViewModel : ObservableObject
         IsBusy = true;
         try
         {
-            await _wallpaperEngine.ApplyAsync(SelectedWallpaper.FilePath, SelectedLayout);
-            _settings.Layout = SelectedLayout;
+            await _wallpaperEngine.ApplyAsync(SelectedWallpaper.FilePath);
             _settings.CurrentWallpaperPath = SelectedWallpaper.FilePath;
             await _settingsService.SaveAsync(_settings);
             StatusMessage = $"已应用：{SelectedWallpaper.DisplayName}";
@@ -178,7 +171,6 @@ public sealed partial class MainViewModel : ObservableObject
         {
             _startupService.SetEnabled(StartWithWindows);
             _settings.StartWithWindows = StartWithWindows;
-            _settings.Layout = SelectedLayout;
             await _settingsService.SaveAsync(_settings);
             StatusMessage = "设置已保存";
         }

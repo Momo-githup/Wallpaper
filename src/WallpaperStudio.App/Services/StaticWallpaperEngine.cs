@@ -1,5 +1,4 @@
 using System.Runtime.InteropServices;
-using WallpaperStudio.App.Models;
 
 namespace WallpaperStudio.App.Services;
 
@@ -9,7 +8,7 @@ public sealed class StaticWallpaperEngine : IWallpaperEngine
 
     public StaticWallpaperEngine(ImageService images) => _images = images;
 
-    public async Task ApplyAsync(string path, WallpaperLayout layout, CancellationToken cancellationToken = default)
+    public async Task ApplyAsync(string path, CancellationToken cancellationToken = default)
     {
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("仅支持 Windows。 ");
         if (!File.Exists(path)) throw new FileNotFoundException("壁纸文件不存在。", path);
@@ -20,7 +19,7 @@ public sealed class StaticWallpaperEngine : IWallpaperEngine
         try
         {
             desktopWallpaper = (IDesktopWallpaper)new DesktopWallpaperClass();
-            desktopWallpaper.SetPosition(MapPosition(layout));
+            desktopWallpaper.SetPosition(DesktopWallpaperPosition.Fill);
             desktopWallpaper.SetWallpaper(null, displayPath);
         }
         catch (COMException exception)
@@ -34,15 +33,6 @@ public sealed class StaticWallpaperEngine : IWallpaperEngine
         }
     }
 
-    internal static DesktopWallpaperPosition MapPosition(WallpaperLayout layout) => layout switch
-    {
-        WallpaperLayout.Center => DesktopWallpaperPosition.Center,
-        WallpaperLayout.Tile => DesktopWallpaperPosition.Tile,
-        WallpaperLayout.Stretch => DesktopWallpaperPosition.Stretch,
-        WallpaperLayout.Fit => DesktopWallpaperPosition.Fit,
-        WallpaperLayout.Span => DesktopWallpaperPosition.Span,
-        _ => DesktopWallpaperPosition.Fill
-    };
 }
 
 internal enum DesktopWallpaperPosition
