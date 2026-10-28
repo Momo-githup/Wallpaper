@@ -14,6 +14,7 @@ public partial class App : System.Windows.Application
     private WinForms.NotifyIcon? _trayIcon;
     private MainWindow? _mainWindow;
     private AppPaths? _paths;
+    private WallpaperManager? _wallpaperManager;
     private bool _isExiting;
 
     protected override async void OnStartup(StartupEventArgs e)
@@ -28,7 +29,9 @@ public partial class App : System.Windows.Application
         };
         var images = new ImageService(_paths);
         new StartupService().EnsureDisabled();
-        var viewModel = new MainViewModel(new LibraryDatabase(_paths), images, new StaticWallpaperEngine(images), new SettingsService(_paths));
+        var mediaFiles = new MediaFileService(images);
+        _wallpaperManager = new WallpaperManager(new StaticWallpaperEngine(images), new DynamicWallpaperEngine());
+        var viewModel = new MainViewModel(new LibraryDatabase(_paths), images, mediaFiles, _wallpaperManager, new SettingsService(_paths));
         _mainWindow = new MainWindow(viewModel);
         _mainWindow.Closing += (_, args) =>
         {
@@ -63,7 +66,7 @@ public partial class App : System.Windows.Application
 
     private void ExitApplication()
     {
-        _isExiting = true; _trayIcon?.Dispose(); _mainWindow?.Close(); Shutdown();
+        _isExiting = true; _wallpaperManager?.StopDynamic(); _trayIcon?.Dispose(); _mainWindow?.Close(); Shutdown();
     }
 }
 

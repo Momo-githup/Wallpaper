@@ -13,16 +13,18 @@ public sealed partial class MainViewModel : ObservableObject
 {
     private readonly LibraryDatabase _database;
     private readonly ImageService _images;
-    private readonly IWallpaperEngine _wallpaperEngine;
+    private readonly MediaFileService _mediaFiles;
+    private readonly WallpaperManager _wallpaperManager;
     private readonly SettingsService _settingsService;
     private AppSettings _settings = new();
 
-    public MainViewModel(LibraryDatabase database, ImageService images, IWallpaperEngine wallpaperEngine,
+    public MainViewModel(LibraryDatabase database, ImageService images, MediaFileService mediaFiles, WallpaperManager wallpaperManager,
         SettingsService settingsService)
     {
         _database = database;
         _images = images;
-        _wallpaperEngine = wallpaperEngine;
+        _mediaFiles = mediaFiles;
+        _wallpaperManager = wallpaperManager;
         _settingsService = settingsService;
     }
 
@@ -37,7 +39,7 @@ public sealed partial class MainViewModel : ObservableObject
     [ObservableProperty]
     private string statusMessage = "准备就绪";
 
-    public event Func<string, Task>? PreviewRequested;
+    public event Func<string, WallpaperMediaType, Task>? PreviewRequested;
 
     public async Task InitializeAsync()
     {
@@ -61,7 +63,7 @@ public sealed partial class MainViewModel : ObservableObject
         var dialog = new OpenFileDialog
         {
             Title = "选择壁纸",
-            Filter = "图片文件|*.jpg;*.jpeg;*.png;*.bmp;*.webp|所有文件|*.*",
+            Filter = "壁纸文件|*.jpg;*.jpeg;*.png;*.bmp;*.webp;*.mp4;*.wmv;*.avi;*.mov;*.m4v|图片|*.jpg;*.jpeg;*.png;*.bmp;*.webp|视频|*.mp4;*.wmv;*.avi;*.mov;*.m4v",
             Multiselect = true
         };
         if (dialog.ShowDialog() == true) await ImportPathsAsync(dialog.FileNames);
@@ -78,7 +80,7 @@ public sealed partial class MainViewModel : ObservableObject
         };
         if (dialog.ShowDialog() != WinForms.DialogResult.OK) return;
         var files = Directory.EnumerateFiles(dialog.SelectedPath, "*.*", SearchOption.AllDirectories)
-            .Where(_images.IsSupported);
+            .Where(_mediaFiles.IsSupported);
         await ImportPathsAsync(files);
     }
 
@@ -87,13 +89,14 @@ public sealed partial class MainViewModel : ObservableObject
         IsBusy = true;
         try
         {
-            var valid = new List<(string Path, int Width, int Height, long Size)>();
+            var valid = new List<(string Path, int Width, int Height, long Size, WallpaperMediaType MediaType)>();
             foreach (var candidate in paths.Distinct(StringComparer.OrdinalIgnoreCase))
             {
                 var path = Path.GetFullPath(candidate);
-                if (!_images.IsSupported(path) || !File.Exists(path)) continue;
-                var info = await _images.InspectAsync(path);
-                if (info is { } imageInfo) valid.Add((path, imageInfo.Width, imageInfo.Height, imageInfo.Size));
+                if (!_mediaFiles.IsSupported(path) || !File.Exists(path)) continue;
+                var info = await _mediaFiles.InspectAsync(path);
+                if (info is { } mediaInfo)
+                    valid.Add((path, mediaInfo.Width, mediaInfo.Height, mediaInfo.Size, _mediaFiles.GetMediaType(path)));
             }
             var added = await _database.AddAsync(valid);
             await ReloadAsync();
@@ -124,7 +127,7 @@ public sealed partial class MainViewModel : ObservableObject
         IsBusy = true;
         try
         {
-            await _wallpaperEngine.ApplyAsync(SelectedWallpaper.FilePath);
+            await _wallpaperManager.ApplyAsync(SelectedWallpaper.Item);
             _settings.CurrentWallpaperPath = SelectedWallpaper.FilePath;
             await _settingsService.SaveAsync(_settings);
             StatusMessage = $"已应用：{SelectedWallpaper.DisplayName}";
@@ -154,8 +157,11 @@ public sealed partial class MainViewModel : ObservableObject
     private async Task PreviewAsync()
     {
         if (SelectedWallpaper is null || PreviewRequested is null) return;
-        var path = await _images.PrepareDisplayFileAsync(SelectedWallpaper.FilePath);
-        await PreviewRequested.Invoke(path);
+        var type = SelectedWallpaper.Item.MediaType;
+        var path = type == WallpaperMediaType.Image
+            ? await _images.PrepareDisplayFileAsync(SelectedWallpaper.FilePath)
+            : SelectedWallpaper.FilePath;
+        await PreviewRequested.Invoke(path, type);
     }
 
     private async Task ReloadAsync()

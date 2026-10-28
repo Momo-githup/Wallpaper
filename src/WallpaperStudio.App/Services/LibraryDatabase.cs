@@ -9,7 +9,11 @@ public sealed class LibraryDatabase
 
     public LibraryDatabase(AppPaths paths)
     {
-        _connectionString = new SqliteConnectionStringBuilder { DataSource = paths.Database }.ToString();
+        _connectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = paths.Database,
+            Pooling = false
+        }.ToString();
     }
 
     public async Task InitializeAsync()
@@ -26,10 +30,18 @@ public sealed class LibraryDatabase
                 PixelHeight INTEGER NOT NULL DEFAULT 0,
                 FileSize INTEGER NOT NULL DEFAULT 0,
                 ImportedAt TEXT NOT NULL,
-                IsFavorite INTEGER NOT NULL DEFAULT 0
+                IsFavorite INTEGER NOT NULL DEFAULT 0,
+                MediaType TEXT NOT NULL DEFAULT 'Image'
             );
             """;
         await command.ExecuteNonQueryAsync();
+        var migration = connection.CreateCommand();
+        migration.CommandText = "SELECT COUNT(*) FROM pragma_table_info('Wallpapers') WHERE name = 'MediaType'";
+        if (Convert.ToInt64(await migration.ExecuteScalarAsync()) == 0)
+        {
+            migration.CommandText = "ALTER TABLE Wallpapers ADD COLUMN MediaType TEXT NOT NULL DEFAULT 'Image'";
+            await migration.ExecuteNonQueryAsync();
+        }
     }
 
     public async Task<IReadOnlyList<WallpaperItem>> GetAllAsync()
@@ -38,18 +50,19 @@ public sealed class LibraryDatabase
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync();
         var command = connection.CreateCommand();
-        command.CommandText = "SELECT Id, FilePath, DisplayName, PixelWidth, PixelHeight, FileSize, ImportedAt, IsFavorite FROM Wallpapers ORDER BY ImportedAt DESC";
+        command.CommandText = "SELECT Id, FilePath, DisplayName, PixelWidth, PixelHeight, FileSize, ImportedAt, IsFavorite, MediaType FROM Wallpapers ORDER BY ImportedAt DESC";
         await using var reader = await command.ExecuteReaderAsync();
         while (await reader.ReadAsync())
         {
             result.Add(new WallpaperItem(
                 reader.GetInt64(0), reader.GetString(1), reader.GetString(2), reader.GetInt32(3), reader.GetInt32(4),
-                reader.GetInt64(5), DateTime.Parse(reader.GetString(6)), reader.GetInt64(7) != 0));
+                reader.GetInt64(5), DateTime.Parse(reader.GetString(6)), reader.GetInt64(7) != 0,
+                Enum.TryParse<WallpaperMediaType>(reader.GetString(8), true, out var type) ? type : WallpaperMediaType.Image));
         }
         return result;
     }
 
-    public async Task<int> AddAsync(IEnumerable<(string Path, int Width, int Height, long Size)> files)
+    public async Task<int> AddAsync(IEnumerable<(string Path, int Width, int Height, long Size, WallpaperMediaType MediaType)> files)
     {
         var added = 0;
         await using var connection = new SqliteConnection(_connectionString);
@@ -60,8 +73,8 @@ public sealed class LibraryDatabase
             var command = connection.CreateCommand();
             command.Transaction = (SqliteTransaction)transaction;
             command.CommandText = """
-                INSERT OR IGNORE INTO Wallpapers(FilePath, DisplayName, PixelWidth, PixelHeight, FileSize, ImportedAt)
-                VALUES($path, $name, $width, $height, $size, $importedAt);
+                INSERT OR IGNORE INTO Wallpapers(FilePath, DisplayName, PixelWidth, PixelHeight, FileSize, ImportedAt, MediaType)
+                VALUES($path, $name, $width, $height, $size, $importedAt, $mediaType);
                 """;
             command.Parameters.AddWithValue("$path", file.Path);
             command.Parameters.AddWithValue("$name", Path.GetFileNameWithoutExtension(file.Path));
@@ -69,6 +82,7 @@ public sealed class LibraryDatabase
             command.Parameters.AddWithValue("$height", file.Height);
             command.Parameters.AddWithValue("$size", file.Size);
             command.Parameters.AddWithValue("$importedAt", DateTime.UtcNow.ToString("O"));
+            command.Parameters.AddWithValue("$mediaType", file.MediaType.ToString());
             added += await command.ExecuteNonQueryAsync();
         }
         await transaction.CommitAsync();

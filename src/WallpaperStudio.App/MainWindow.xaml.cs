@@ -25,9 +25,9 @@ public partial class MainWindow : Window
         _viewModel.PreviewRequested += ShowPreviewAsync;
     }
 
-    private Task ShowPreviewAsync(string path)
+    private Task ShowPreviewAsync(string path, WallpaperStudio.App.Models.WallpaperMediaType mediaType)
     {
-        new PreviewWindow(path) { Owner = this }.ShowDialog();
+        new PreviewWindow(path, mediaType) { Owner = this }.ShowDialog();
         return Task.CompletedTask;
     }
 

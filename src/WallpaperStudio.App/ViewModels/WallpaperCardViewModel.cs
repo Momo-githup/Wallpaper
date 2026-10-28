@@ -21,10 +21,15 @@ public sealed partial class WallpaperCardViewModel : ObservableObject
     public string DisplayName => Item.DisplayName;
     public string Resolution => Item.Resolution;
     public string FileSizeText => Item.FileSizeText;
+    public bool IsVideo => Item.MediaType == WallpaperMediaType.Video;
+    public string MediaGlyph => IsVideo ? "▶" : string.Empty;
     public bool Exists => File.Exists(FilePath);
 
     [ObservableProperty]
     private ImageSource? thumbnail;
 
-    public async Task LoadThumbnailAsync() => Thumbnail = await _images.GetThumbnailAsync(FilePath);
+    public async Task LoadThumbnailAsync()
+    {
+        if (!IsVideo) Thumbnail = await _images.GetThumbnailAsync(FilePath);
+    }
 }
