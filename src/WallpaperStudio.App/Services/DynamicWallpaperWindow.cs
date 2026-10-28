@@ -1,42 +1,69 @@
+using LibVLCSharp.Shared;
 using Microsoft.Win32;
 using System.Runtime.InteropServices;
-using System.Windows;
-using System.Windows.Controls;
 using System.Windows.Interop;
-using System.Windows.Media;
 
 namespace WallpaperStudio.App.Services;
 
-internal sealed class DynamicWallpaperWindow : Window
+internal sealed class DynamicWallpaperWindow : IDisposable
 {
-    private readonly MediaElement _player;
+    private readonly string _path;
     private readonly TaskCompletionSource _opened = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private HwndSource? _source;
+    private LibVLC? _libVlc;
+    private MediaPlayer? _player;
+    private Media? _media;
     private IntPtr _desktopHost;
     private IntPtr _desktopIconView;
+    private bool _disposed;
 
     public DynamicWallpaperWindow(string path)
     {
-        WindowStyle = WindowStyle.None;
-        ResizeMode = ResizeMode.NoResize;
-        ShowInTaskbar = false;
-        ShowActivated = false;
-        Background = System.Windows.Media.Brushes.Black;
-        _player = new MediaElement
-        {
-            LoadedBehavior = MediaState.Manual,
-            UnloadedBehavior = MediaState.Manual,
-            Stretch = Stretch.UniformToFill,
-            Volume = 0,
-            Source = new Uri(path, UriKind.Absolute)
-        };
-        _player.Loaded += (_, _) => _player.Play();
-        _player.MediaOpened += (_, _) => _opened.TrySetResult();
-        _player.MediaEnded += (_, _) => { _player.Position = TimeSpan.Zero; _player.Play(); };
-        _player.MediaFailed += (_, args) => _opened.TrySetException(
-            args.ErrorException ?? new InvalidOperationException("Windows 无法播放这个视频。"));
-        Content = _player;
-        SourceInitialized += OnSourceInitialized;
+        _path = path;
         SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
+    }
+
+    public void Start()
+    {
+        if (_source is not null) return;
+        var desktop = DesktopHost.Find();
+        _desktopHost = desktop.Host;
+        _desktopIconView = desktop.IconView;
+        if (_desktopHost == IntPtr.Zero || !NativeMethods.GetClientRect(_desktopHost, out var rect))
+            throw new InvalidOperationException("无法连接 Windows 桌面窗口。");
+
+        var parameters = new HwndSourceParameters("WallpaperStudio.DynamicWallpaper",
+            rect.Right - rect.Left, rect.Bottom - rect.Top)
+        {
+            ParentWindow = _desktopHost,
+            PositionX = 0,
+            PositionY = 0,
+            WindowStyle = (int)(NativeMethods.WsChild | NativeMethods.WsVisible |
+                NativeMethods.WsClipChildren | NativeMethods.WsClipSiblings),
+            ExtendedWindowStyle = NativeMethods.WsExNoActivate | NativeMethods.WsExToolWindow
+        };
+        _source = new HwndSource(parameters);
+        ResizeToDesktop();
+
+        Core.Initialize();
+        // Explorer's desktop host does not reliably composite Direct3D video surfaces.
+        // The WinGDI output writes every frame into the child HWND and remains visible
+        // behind desktop icons on Windows 10/11.
+        _libVlc = new LibVLC("--no-audio", "--no-video-title-show", "--quiet",
+            "--avcodec-hw=none", "--vout=wingdi");
+        _player = new MediaPlayer(_libVlc)
+        {
+            Hwnd = _source.Handle,
+            EnableHardwareDecoding = false
+        };
+        _player.Playing += OnPlaying;
+        _player.EndReached += OnEndReached;
+        _player.EncounteredError += OnEncounteredError;
+        _media = new Media(_libVlc, new Uri(_path));
+        _media.AddOption(":input-repeat=-1");
+        _media.AddOption(":no-audio");
+        if (!_player.Play(_media))
+            throw new InvalidOperationException("无法启动视频播放器。");
     }
 
     public async Task WaitUntilOpenedAsync(CancellationToken cancellationToken)
@@ -53,39 +80,58 @@ internal sealed class DynamicWallpaperWindow : Window
 
     public void StopPlayback()
     {
-        SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
-        _player.Stop();
-        _player.Source = null;
-        Close();
+        Dispose();
     }
 
-    private void OnSourceInitialized(object? sender, EventArgs e)
+    public void Dispose()
     {
-        var handle = new WindowInteropHelper(this).Handle;
-        var desktop = DesktopHost.Find();
-        _desktopHost = desktop.Host;
-        _desktopIconView = desktop.IconView;
-        if (_desktopHost == IntPtr.Zero) throw new InvalidOperationException("无法连接 Windows 桌面窗口。");
-
-        var style = NativeMethods.GetWindowLongPtr(handle, NativeMethods.GwlStyle).ToInt64();
-        style = (style & ~NativeMethods.WsPopup) | NativeMethods.WsChild | NativeMethods.WsVisible;
-        Marshal.SetLastPInvokeError(0);
-        if (NativeMethods.SetParent(handle, _desktopHost) == IntPtr.Zero && Marshal.GetLastPInvokeError() != 0)
-            throw new InvalidOperationException("无法把视频窗口挂载到 Windows 桌面。");
-        NativeMethods.SetWindowLongPtr(handle, NativeMethods.GwlStyle, new IntPtr(style));
-        ResizeToDesktop(handle);
+        if (_disposed) return;
+        _disposed = true;
+        SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
+        if (_player is not null)
+        {
+            _player.Playing -= OnPlaying;
+            _player.EndReached -= OnEndReached;
+            _player.EncounteredError -= OnEncounteredError;
+            _player.Stop();
+            _player.Dispose();
+            _player = null;
+        }
+        _media?.Dispose();
+        _media = null;
+        _libVlc?.Dispose();
+        _libVlc = null;
+        _source?.Dispose();
+        _source = null;
     }
 
     private void OnDisplaySettingsChanged(object? sender, EventArgs e)
     {
-        Dispatcher.Invoke(() => ResizeToDesktop(new WindowInteropHelper(this).Handle));
+        _source?.Dispatcher.Invoke(ResizeToDesktop);
     }
 
-    private void ResizeToDesktop(IntPtr handle)
+    private void OnPlaying(object? sender, EventArgs e) => _opened.TrySetResult();
+
+    private void OnEndReached(object? sender, EventArgs e)
     {
-        if (_desktopHost == IntPtr.Zero || !NativeMethods.GetClientRect(_desktopHost, out var rect)) return;
+        // LibVLC raises EndReached on its playback thread. Restarting from that
+        // thread can deadlock, so hand the replay back to WPF's UI dispatcher.
+        System.Windows.Application.Current.Dispatcher.BeginInvoke(() =>
+        {
+            if (_disposed || _player is null || _media is null) return;
+            _player.Stop();
+            _player.Play(_media);
+        });
+    }
+
+    private void OnEncounteredError(object? sender, EventArgs e) =>
+        _opened.TrySetException(new InvalidOperationException("LibVLC 无法播放这个视频。"));
+
+    private void ResizeToDesktop()
+    {
+        if (_source is null || _desktopHost == IntPtr.Zero || !NativeMethods.GetClientRect(_desktopHost, out var rect)) return;
         var insertAfter = _desktopIconView != IntPtr.Zero ? _desktopIconView : new IntPtr(1);
-        NativeMethods.SetWindowPos(handle, insertAfter, 0, 0, rect.Right - rect.Left, rect.Bottom - rect.Top,
+        NativeMethods.SetWindowPos(_source.Handle, insertAfter, 0, 0, rect.Right - rect.Left, rect.Bottom - rect.Top,
             NativeMethods.SwpNoActivate | NativeMethods.SwpShowWindow | NativeMethods.SwpFrameChanged);
     }
 }
@@ -121,10 +167,12 @@ internal readonly record struct DesktopTarget(IntPtr Host, IntPtr IconView);
 
 internal static class NativeMethods
 {
-    internal const int GwlStyle = -16;
     internal const long WsChild = 0x40000000L;
-    internal const long WsPopup = 0x80000000L;
     internal const long WsVisible = 0x10000000L;
+    internal const long WsClipChildren = 0x02000000L;
+    internal const long WsClipSiblings = 0x04000000L;
+    internal const int WsExToolWindow = 0x00000080;
+    internal const int WsExNoActivate = 0x08000000;
     internal const uint SwpNoActivate = 0x0010;
     internal const uint SwpFrameChanged = 0x0020;
     internal const uint SwpShowWindow = 0x0040;
@@ -140,15 +188,6 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool EnumWindows(EnumWindowsProc callback, IntPtr parameter);
-
-    [DllImport("user32.dll", SetLastError = true)]
-    internal static extern IntPtr SetParent(IntPtr child, IntPtr newParent);
-
-    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW", SetLastError = true)]
-    internal static extern IntPtr GetWindowLongPtr(IntPtr hwnd, int index);
-
-    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW", SetLastError = true)]
-    internal static extern IntPtr SetWindowLongPtr(IntPtr hwnd, int index, IntPtr value);
 
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]

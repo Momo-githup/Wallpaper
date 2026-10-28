@@ -11,7 +11,7 @@ public sealed class DynamicWallpaperEngine
         _window = window;
         try
         {
-            window.Show();
+            window.Start();
             await window.WaitUntilOpenedAsync(cancellationToken);
         }
         catch
