@@ -12,6 +12,7 @@ internal sealed class DynamicWallpaperWindow : Window
     private readonly MediaElement _player;
     private readonly TaskCompletionSource _opened = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private IntPtr _desktopHost;
+    private IntPtr _desktopIconView;
 
     public DynamicWallpaperWindow(string path)
     {
@@ -61,7 +62,9 @@ internal sealed class DynamicWallpaperWindow : Window
     private void OnSourceInitialized(object? sender, EventArgs e)
     {
         var handle = new WindowInteropHelper(this).Handle;
-        _desktopHost = DesktopHost.Find();
+        var desktop = DesktopHost.Find();
+        _desktopHost = desktop.Host;
+        _desktopIconView = desktop.IconView;
         if (_desktopHost == IntPtr.Zero) throw new InvalidOperationException("无法连接 Windows 桌面窗口。");
 
         var style = NativeMethods.GetWindowLongPtr(handle, NativeMethods.GwlStyle).ToInt64();
@@ -81,30 +84,40 @@ internal sealed class DynamicWallpaperWindow : Window
     private void ResizeToDesktop(IntPtr handle)
     {
         if (_desktopHost == IntPtr.Zero || !NativeMethods.GetClientRect(_desktopHost, out var rect)) return;
-        NativeMethods.SetWindowPos(handle, new IntPtr(1), 0, 0, rect.Right - rect.Left, rect.Bottom - rect.Top,
+        var insertAfter = _desktopIconView != IntPtr.Zero ? _desktopIconView : new IntPtr(1);
+        NativeMethods.SetWindowPos(handle, insertAfter, 0, 0, rect.Right - rect.Left, rect.Bottom - rect.Top,
             NativeMethods.SwpNoActivate | NativeMethods.SwpShowWindow | NativeMethods.SwpFrameChanged);
     }
 }
 
 internal static class DesktopHost
 {
-    public static IntPtr Find()
+    public static DesktopTarget Find()
     {
         var progman = NativeMethods.FindWindow("Progman", null);
-        if (progman == IntPtr.Zero) return IntPtr.Zero;
+        if (progman == IntPtr.Zero) return default;
 
         NativeMethods.SendMessageTimeout(progman, 0x052C, IntPtr.Zero, IntPtr.Zero, 0, 1000, out _);
         var iconHost = IntPtr.Zero;
+        var iconView = IntPtr.Zero;
         NativeMethods.EnumWindows((top, _) =>
         {
             var shellView = NativeMethods.FindWindowEx(top, IntPtr.Zero, "SHELLDLL_DefView", null);
             if (shellView == IntPtr.Zero) return true;
             iconHost = top;
+            iconView = shellView;
             return false;
         }, IntPtr.Zero);
-        return iconHost != IntPtr.Zero ? iconHost : progman;
+        if (iconHost == IntPtr.Zero)
+        {
+            iconHost = progman;
+            iconView = NativeMethods.FindWindowEx(progman, IntPtr.Zero, "SHELLDLL_DefView", null);
+        }
+        return new DesktopTarget(iconHost, iconView);
     }
 }
+
+internal readonly record struct DesktopTarget(IntPtr Host, IntPtr IconView);
 
 internal static class NativeMethods
 {
