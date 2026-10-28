@@ -1,0 +1,11 @@
+bin/
+obj/
+.vs/
+.idea/
+.nuget/
+.dotnet-cli/
+TestResults/
+publish/
+*.user
+*.suo
+*.log
