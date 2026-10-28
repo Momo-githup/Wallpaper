@@ -66,8 +66,10 @@ internal sealed class DynamicWallpaperWindow : Window
 
         var style = NativeMethods.GetWindowLongPtr(handle, NativeMethods.GwlStyle).ToInt64();
         style = (style & ~NativeMethods.WsPopup) | NativeMethods.WsChild | NativeMethods.WsVisible;
+        Marshal.SetLastPInvokeError(0);
+        if (NativeMethods.SetParent(handle, _desktopHost) == IntPtr.Zero && Marshal.GetLastPInvokeError() != 0)
+            throw new InvalidOperationException("无法把视频窗口挂载到 Windows 桌面。");
         NativeMethods.SetWindowLongPtr(handle, NativeMethods.GwlStyle, new IntPtr(style));
-        NativeMethods.SetParent(handle, _desktopHost);
         ResizeToDesktop(handle);
     }
 
@@ -80,7 +82,7 @@ internal sealed class DynamicWallpaperWindow : Window
     {
         if (_desktopHost == IntPtr.Zero || !NativeMethods.GetClientRect(_desktopHost, out var rect)) return;
         NativeMethods.SetWindowPos(handle, new IntPtr(1), 0, 0, rect.Right - rect.Left, rect.Bottom - rect.Top,
-            NativeMethods.SwpNoActivate | NativeMethods.SwpShowWindow);
+            NativeMethods.SwpNoActivate | NativeMethods.SwpShowWindow | NativeMethods.SwpFrameChanged);
     }
 }
 
@@ -91,17 +93,16 @@ internal static class DesktopHost
         var progman = NativeMethods.FindWindow("Progman", null);
         if (progman == IntPtr.Zero) return IntPtr.Zero;
 
-        NativeMethods.SendMessageTimeout(progman, 0x052C, new IntPtr(0xD), new IntPtr(1),
-            0, 1000, out _);
-        var worker = IntPtr.Zero;
+        NativeMethods.SendMessageTimeout(progman, 0x052C, IntPtr.Zero, IntPtr.Zero, 0, 1000, out _);
+        var iconHost = IntPtr.Zero;
         NativeMethods.EnumWindows((top, _) =>
         {
             var shellView = NativeMethods.FindWindowEx(top, IntPtr.Zero, "SHELLDLL_DefView", null);
             if (shellView == IntPtr.Zero) return true;
-            worker = NativeMethods.FindWindowEx(IntPtr.Zero, top, "WorkerW", null);
+            iconHost = top;
             return false;
         }, IntPtr.Zero);
-        return worker != IntPtr.Zero ? worker : progman;
+        return iconHost != IntPtr.Zero ? iconHost : progman;
     }
 }
 
@@ -112,6 +113,7 @@ internal static class NativeMethods
     internal const long WsPopup = 0x80000000L;
     internal const long WsVisible = 0x10000000L;
     internal const uint SwpNoActivate = 0x0010;
+    internal const uint SwpFrameChanged = 0x0020;
     internal const uint SwpShowWindow = 0x0040;
 
     internal delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr parameter);
