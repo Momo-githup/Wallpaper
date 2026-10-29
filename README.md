@@ -39,7 +39,7 @@ dotnet test WallpaperStudio.sln --no-restore
 生成无需预装 .NET 的 x64 版本：
 
 ```powershell
-dotnet publish src/WallpaperStudio.App -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o publish/win-x64
+dotnet publish src/WallpaperStudio.App -c Release -r win-x64 --self-contained true -o publish/win-x64
 ```
 
 应用数据保存在 `%LOCALAPPDATA%\WallpaperStudio`。正式分发前建议为可执行文件和安装包配置代码签名。
