@@ -70,9 +70,14 @@ public class CoreTests
         try
         {
             var service = new SettingsService(new AppPaths(root));
-            await service.SaveAsync(new AppSettings { CurrentWallpaperPath = "x.jpg" });
+            await service.SaveAsync(new AppSettings
+            {
+                CurrentWallpaperPath = "x.mp4",
+                CurrentWallpaperMediaType = WallpaperMediaType.Video
+            });
             var loaded = await service.LoadAsync();
-            Assert.Equal("x.jpg", loaded.CurrentWallpaperPath);
+            Assert.Equal("x.mp4", loaded.CurrentWallpaperPath);
+            Assert.Equal(WallpaperMediaType.Video, loaded.CurrentWallpaperMediaType);
         }
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
     }

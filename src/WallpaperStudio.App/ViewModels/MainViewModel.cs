@@ -16,16 +16,18 @@ public sealed partial class MainViewModel : ObservableObject
     private readonly MediaFileService _mediaFiles;
     private readonly WallpaperManager _wallpaperManager;
     private readonly SettingsService _settingsService;
+    private readonly StartupService _startupService;
     private AppSettings _settings = new();
 
     public MainViewModel(LibraryDatabase database, ImageService images, MediaFileService mediaFiles, WallpaperManager wallpaperManager,
-        SettingsService settingsService)
+        SettingsService settingsService, StartupService startupService)
     {
         _database = database;
         _images = images;
         _mediaFiles = mediaFiles;
         _wallpaperManager = wallpaperManager;
         _settingsService = settingsService;
+        _startupService = startupService;
     }
 
     public ObservableCollection<WallpaperCardViewModel> Wallpapers { get; } = [];
@@ -129,7 +131,12 @@ public sealed partial class MainViewModel : ObservableObject
         {
             await _wallpaperManager.ApplyAsync(SelectedWallpaper.Item);
             _settings.CurrentWallpaperPath = SelectedWallpaper.FilePath;
+            _settings.CurrentWallpaperMediaType = SelectedWallpaper.Item.MediaType;
             await _settingsService.SaveAsync(_settings);
+            if (SelectedWallpaper.Item.MediaType == WallpaperMediaType.Video)
+                _startupService.EnableDynamicHost();
+            else
+                _startupService.Disable();
             StatusMessage = $"已应用：{SelectedWallpaper.DisplayName}";
         }
         catch (Exception exception)

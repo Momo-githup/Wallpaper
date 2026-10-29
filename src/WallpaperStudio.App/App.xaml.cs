@@ -14,24 +14,47 @@ public partial class App : System.Windows.Application
     private WinForms.NotifyIcon? _trayIcon;
     private MainWindow? _mainWindow;
     private AppPaths? _paths;
-    private WallpaperManager? _wallpaperManager;
+    private DynamicWallpaperHostServer? _hostServer;
     private bool _isExiting;
 
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
         _paths = new AppPaths();
+        var isWallpaperHost = e.Args.Contains("--wallpaper-host", StringComparer.OrdinalIgnoreCase);
         DispatcherUnhandledException += (_, args) =>
         {
             File.AppendAllText(_paths.Log, $"{DateTime.Now:O} {args.Exception}\n");
-            MessageBox.Show("发生了未处理的错误，详情已写入日志。", "Wallpaper Studio", MessageBoxButton.OK, MessageBoxImage.Error);
+            if (!isWallpaperHost)
+                MessageBox.Show("发生了未处理的错误，详情已写入日志。", "Wallpaper Studio", MessageBoxButton.OK, MessageBoxImage.Error);
             args.Handled = true;
+            if (isWallpaperHost) Shutdown();
         };
+        if (isWallpaperHost)
+        {
+            _hostServer = new DynamicWallpaperHostServer(_paths, Dispatcher);
+            if (!_hostServer.TryAcquireSingleInstance())
+            {
+                Shutdown();
+                return;
+            }
+            _ = RunWallpaperHostAsync();
+            return;
+        }
+
         var images = new ImageService(_paths);
-        new StartupService().EnsureDisabled();
+        var startup = new StartupService();
+        var savedSettings = await new SettingsService(_paths).LoadAsync();
+        var savedPath = savedSettings.CurrentWallpaperPath;
+        var hasSavedDynamicWallpaper = savedSettings.CurrentWallpaperMediaType == Models.WallpaperMediaType.Video ||
+            (savedSettings.CurrentWallpaperMediaType is null &&
+             string.Equals(Path.GetExtension(savedPath), ".mp4", StringComparison.OrdinalIgnoreCase));
+        if (hasSavedDynamicWallpaper && !string.IsNullOrWhiteSpace(savedPath) && File.Exists(savedPath))
+            startup.EnableDynamicHost();
         var mediaFiles = new MediaFileService(images);
-        _wallpaperManager = new WallpaperManager(new StaticWallpaperEngine(images), new DynamicWallpaperEngine());
-        var viewModel = new MainViewModel(new LibraryDatabase(_paths), images, mediaFiles, _wallpaperManager, new SettingsService(_paths));
+        var wallpaperManager = new WallpaperManager(new StaticWallpaperEngine(images), new DynamicWallpaperHostClient());
+        var viewModel = new MainViewModel(new LibraryDatabase(_paths), images, mediaFiles, wallpaperManager,
+            new SettingsService(_paths), startup);
         _mainWindow = new MainWindow(viewModel);
         _mainWindow.Closing += (_, args) =>
         {
@@ -66,7 +89,27 @@ public partial class App : System.Windows.Application
 
     private void ExitApplication()
     {
-        _isExiting = true; _wallpaperManager?.StopDynamic(); _trayIcon?.Dispose(); _mainWindow?.Close(); Shutdown();
+        _isExiting = true; _trayIcon?.Dispose(); _mainWindow?.Close(); Shutdown();
+    }
+
+    private async Task RunWallpaperHostAsync()
+    {
+        try
+        {
+            await _hostServer!.RunAsync();
+        }
+        catch (Exception exception)
+        {
+            if (_paths is not null)
+                await File.AppendAllTextAsync(_paths.Log, $"{DateTime.Now:O} {exception}\n");
+            Shutdown();
+        }
+    }
+
+    protected override void OnExit(ExitEventArgs e)
+    {
+        _hostServer?.Dispose();
+        base.OnExit(e);
     }
 }
 
