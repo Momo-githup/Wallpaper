@@ -1,6 +1,8 @@
 using LibVLCSharp.Shared;
 using Microsoft.Win32;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using System.Text;
 using System.Windows.Interop;
 using System.Windows.Threading;
 
@@ -11,6 +13,7 @@ internal sealed class DynamicWallpaperWindow : IDisposable
     private const long LoopSeekLeadMilliseconds = 80;
 
     private readonly string _path;
+    private readonly string _fallbackPath;
     private readonly TaskCompletionSource _opened = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private HwndSource? _source;
     private LibVLC? _libVlc;
@@ -20,11 +23,17 @@ internal sealed class DynamicWallpaperWindow : IDisposable
     private IntPtr _desktopHost;
     private IntPtr _desktopIconView;
     private bool _loopSeekPending;
+    private bool _fallbackPreparing;
+    private bool _fallbackPrepared;
+    private int _fallbackAttempts;
     private bool _disposed;
 
-    public DynamicWallpaperWindow(string path)
+    public DynamicWallpaperWindow(string path, string cacheDirectory)
     {
         _path = path;
+        var fingerprint = $"{Path.GetFullPath(path).ToUpperInvariant()}|{File.GetLastWriteTimeUtc(path).Ticks}";
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(fingerprint)))[..20];
+        _fallbackPath = Path.Combine(cacheDirectory, $"dynamic-fallback-{hash}.png");
         SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
     }
 
@@ -137,6 +146,9 @@ internal sealed class DynamicWallpaperWindow : IDisposable
         var time = _player.Time;
         if (length <= 0 || time < 0) return;
 
+        if (!_fallbackPrepared && !_fallbackPreparing && time >= 100 && _fallbackAttempts < 20)
+            _ = PrepareDesktopFallbackAsync();
+
         // Do not let VLC reach the real end of the stream. At EOF its WinGDI
         // video output can be destroyed for one paint, exposing Explorer's
         // static wallpaper. Seeking while the player is still running keeps
@@ -150,6 +162,71 @@ internal sealed class DynamicWallpaperWindow : IDisposable
         if (_loopSeekPending) return;
         _loopSeekPending = true;
         _player.Time = 0;
+    }
+
+    private async Task PrepareDesktopFallbackAsync()
+    {
+        if (_disposed || _player is null || _fallbackPreparing || _fallbackPrepared) return;
+        _fallbackPreparing = true;
+        _fallbackAttempts++;
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(_fallbackPath)!);
+            if (!File.Exists(_fallbackPath))
+            {
+                if (!_player.TakeSnapshot(0, _fallbackPath, 0, 0)) return;
+
+                var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(2);
+                while (DateTime.UtcNow < deadline)
+                {
+                    if (_disposed) return;
+                    if (File.Exists(_fallbackPath) && new FileInfo(_fallbackPath).Length > 0) break;
+                    await Task.Delay(40);
+                }
+            }
+
+            if (!File.Exists(_fallbackPath) || new FileInfo(_fallbackPath).Length == 0) return;
+            SetDesktopFallback(_fallbackPath);
+            RefreshDesktopHost();
+            _fallbackPrepared = true;
+        }
+        catch
+        {
+            // Snapshot creation is a visual fallback only. Playback must keep
+            // running even when Windows or LibVLC temporarily rejects it.
+        }
+        finally
+        {
+            _fallbackPreparing = false;
+        }
+    }
+
+    private static void SetDesktopFallback(string path)
+    {
+        IDesktopWallpaper? desktopWallpaper = null;
+        try
+        {
+            desktopWallpaper = (IDesktopWallpaper)new DesktopWallpaperClass();
+            desktopWallpaper.SetPosition(DesktopWallpaperPosition.Fill);
+            desktopWallpaper.SetWallpaper(null, path);
+        }
+        finally
+        {
+            if (desktopWallpaper is not null && Marshal.IsComObject(desktopWallpaper))
+                Marshal.FinalReleaseComObject(desktopWallpaper);
+        }
+    }
+
+    private void RefreshDesktopHost()
+    {
+        if (_source is null) return;
+        var desktop = DesktopHost.Find();
+        if (desktop.Host == IntPtr.Zero) return;
+        if (desktop.Host != _desktopHost)
+            NativeMethods.SetParent(_source.Handle, desktop.Host);
+        _desktopHost = desktop.Host;
+        _desktopIconView = desktop.IconView;
+        ResizeToDesktop();
     }
 
     private void OnEndReached(object? sender, EventArgs e)
@@ -233,6 +310,9 @@ internal static class NativeMethods
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool SetWindowPos(IntPtr hwnd, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    internal static extern IntPtr SetParent(IntPtr child, IntPtr newParent);
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]

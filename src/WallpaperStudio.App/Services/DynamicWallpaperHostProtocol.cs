@@ -104,7 +104,7 @@ internal sealed class DynamicWallpaperHostServer : IDisposable
 {
     private readonly AppPaths _paths;
     private readonly Dispatcher _dispatcher;
-    private readonly DynamicWallpaperEngine _engine = new();
+    private readonly DynamicWallpaperEngine _engine;
     private Mutex? _mutex;
     private bool _stopping;
 
@@ -112,6 +112,7 @@ internal sealed class DynamicWallpaperHostServer : IDisposable
     {
         _paths = paths;
         _dispatcher = dispatcher;
+        _engine = new DynamicWallpaperEngine(paths.Cache);
     }
 
     internal bool TryAcquireSingleInstance()

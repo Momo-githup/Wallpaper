@@ -2,12 +2,15 @@ namespace WallpaperStudio.App.Services;
 
 public sealed class DynamicWallpaperEngine
 {
+    private readonly string _cacheDirectory;
     private DynamicWallpaperWindow? _window;
+
+    public DynamicWallpaperEngine(string cacheDirectory) => _cacheDirectory = cacheDirectory;
 
     public async Task ApplyAsync(string path, CancellationToken cancellationToken = default)
     {
         Stop();
-        var window = new DynamicWallpaperWindow(path);
+        var window = new DynamicWallpaperWindow(path, _cacheDirectory);
         _window = window;
         try
         {
