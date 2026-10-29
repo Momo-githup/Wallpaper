@@ -50,7 +50,7 @@ internal sealed class DynamicWallpaperWindow : IDisposable
         // The WinGDI output writes every frame into the child HWND and remains visible
         // behind desktop icons on Windows 10/11.
         _libVlc = new LibVLC("--no-audio", "--no-video-title-show", "--quiet",
-            "--avcodec-hw=none", "--vout=wingdi");
+            "--avcodec-hw=none", "--vout=wingdi", "--input-repeat=-1");
         _player = new MediaPlayer(_libVlc)
         {
             Hwnd = _source.Handle,
@@ -114,12 +114,12 @@ internal sealed class DynamicWallpaperWindow : IDisposable
 
     private void OnEndReached(object? sender, EventArgs e)
     {
-        // LibVLC raises EndReached on its playback thread. Restarting from that
-        // thread can deadlock, so hand the replay back to WPF's UI dispatcher.
+        // input-repeat normally loops inside VLC without closing the video output.
+        // Keep this as a fallback, but never call Stop here: Stop clears the HWND
+        // and briefly exposes the static wallpaper underneath it.
         System.Windows.Application.Current.Dispatcher.BeginInvoke(() =>
         {
             if (_disposed || _player is null || _media is null) return;
-            _player.Stop();
             _player.Play(_media);
         });
     }
