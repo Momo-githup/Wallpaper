@@ -23,9 +23,6 @@ internal sealed class DynamicWallpaperWindow : IDisposable
     private IntPtr _desktopHost;
     private IntPtr _desktopIconView;
     private bool _loopSeekPending;
-    private bool _fallbackPreparing;
-    private bool _fallbackPrepared;
-    private int _fallbackAttempts;
     private bool _disposed;
 
     public DynamicWallpaperWindow(string path, string cacheDirectory)
@@ -146,9 +143,6 @@ internal sealed class DynamicWallpaperWindow : IDisposable
         var time = _player.Time;
         if (length <= 0 || time < 0) return;
 
-        if (!_fallbackPrepared && !_fallbackPreparing && time >= 100 && _fallbackAttempts < 20)
-            _ = PrepareDesktopFallbackAsync();
-
         // Do not let VLC reach the real end of the stream. At EOF its WinGDI
         // video output can be destroyed for one paint, exposing Explorer's
         // static wallpaper. Seeking while the player is still running keeps
@@ -164,40 +158,60 @@ internal sealed class DynamicWallpaperWindow : IDisposable
         _player.Time = 0;
     }
 
-    private async Task PrepareDesktopFallbackAsync()
+    public bool TryApplyCachedFallback()
     {
-        if (_disposed || _player is null || _fallbackPreparing || _fallbackPrepared) return;
-        _fallbackPreparing = true;
-        _fallbackAttempts++;
+        if (!File.Exists(_fallbackPath) || new FileInfo(_fallbackPath).Length == 0) return false;
+        try
+        {
+            SetDesktopFallback(_fallbackPath);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public async Task PrepareDesktopFallbackAsync(CancellationToken cancellationToken)
+    {
+        if (_disposed || _player is null || TryApplyCachedFallback()) return;
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(_fallbackPath)!);
-            if (!File.Exists(_fallbackPath))
+            var snapshotDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(3);
+            var snapshotRequested = false;
+            while (DateTime.UtcNow < snapshotDeadline && !_disposed)
             {
-                if (!_player.TakeSnapshot(0, _fallbackPath, 0, 0)) return;
-
-                var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(2);
-                while (DateTime.UtcNow < deadline)
+                cancellationToken.ThrowIfCancellationRequested();
+                if (_player.Time >= 100 && _player.TakeSnapshot(0, _fallbackPath, 0, 0))
                 {
-                    if (_disposed) return;
-                    if (File.Exists(_fallbackPath) && new FileInfo(_fallbackPath).Length > 0) break;
-                    await Task.Delay(40);
+                    snapshotRequested = true;
+                    break;
                 }
+                await Task.Delay(80, cancellationToken);
             }
+            if (!snapshotRequested) return;
 
-            if (!File.Exists(_fallbackPath) || new FileInfo(_fallbackPath).Length == 0) return;
-            SetDesktopFallback(_fallbackPath);
-            RefreshDesktopHost();
-            _fallbackPrepared = true;
+            var fileDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(2);
+            while (DateTime.UtcNow < fileDeadline && !_disposed)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (File.Exists(_fallbackPath) && new FileInfo(_fallbackPath).Length > 0)
+                {
+                    SetDesktopFallback(_fallbackPath);
+                    return;
+                }
+                await Task.Delay(40, cancellationToken);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch
         {
             // Snapshot creation is a visual fallback only. Playback must keep
             // running even when Windows or LibVLC temporarily rejects it.
-        }
-        finally
-        {
-            _fallbackPreparing = false;
         }
     }
 
@@ -215,18 +229,6 @@ internal sealed class DynamicWallpaperWindow : IDisposable
             if (desktopWallpaper is not null && Marshal.IsComObject(desktopWallpaper))
                 Marshal.FinalReleaseComObject(desktopWallpaper);
         }
-    }
-
-    private void RefreshDesktopHost()
-    {
-        if (_source is null) return;
-        var desktop = DesktopHost.Find();
-        if (desktop.Host == IntPtr.Zero) return;
-        if (desktop.Host != _desktopHost)
-            NativeMethods.SetParent(_source.Handle, desktop.Host);
-        _desktopHost = desktop.Host;
-        _desktopIconView = desktop.IconView;
-        ResizeToDesktop();
     }
 
     private void OnEndReached(object? sender, EventArgs e)
@@ -310,9 +312,6 @@ internal static class NativeMethods
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool SetWindowPos(IntPtr hwnd, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
-
-    [DllImport("user32.dll", SetLastError = true)]
-    internal static extern IntPtr SetParent(IntPtr child, IntPtr newParent);
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
