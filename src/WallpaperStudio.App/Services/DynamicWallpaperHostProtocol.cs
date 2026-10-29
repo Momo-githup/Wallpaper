@@ -22,7 +22,7 @@ public sealed class DynamicWallpaperHostClient
     {
         if (!File.Exists(path)) throw new FileNotFoundException("视频文件不存在。", path);
         await EnsureHostAsync(cancellationToken);
-        var response = await SendAsync(new DynamicHostRequest("apply", path), TimeSpan.FromSeconds(12), cancellationToken);
+        var response = await SendAsync(new DynamicHostRequest("apply", path), TimeSpan.FromSeconds(35), cancellationToken);
         if (!response.Success) throw new InvalidOperationException(response.Error ?? "动态壁纸引擎启动失败。");
     }
 
@@ -53,7 +53,7 @@ public sealed class DynamicWallpaperHostClient
             WindowStyle = ProcessWindowStyle.Hidden
         });
 
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(8);
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(15);
         while (DateTime.UtcNow < deadline)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -105,6 +105,8 @@ internal sealed class DynamicWallpaperHostServer : IDisposable
     private readonly AppPaths _paths;
     private readonly Dispatcher _dispatcher;
     private readonly DynamicWallpaperEngine _engine;
+    private readonly CancellationTokenSource _restoreCancellation = new();
+    private Task? _restoreTask;
     private Mutex? _mutex;
     private bool _stopping;
 
@@ -123,7 +125,10 @@ internal sealed class DynamicWallpaperHostServer : IDisposable
 
     internal async Task RunAsync()
     {
-        await RestoreLastDynamicWallpaperAsync();
+        // Make the pipe available immediately. Restoring a video can take
+        // several seconds, and doing it before listening made the UI believe
+        // the host had failed to start and launch redundant retry processes.
+        _restoreTask = RestoreLastDynamicWallpaperAsync(_restoreCancellation.Token);
         while (!_stopping)
         {
             await using var pipe = new NamedPipeServerStream(DynamicWallpaperHostProtocol.PipeName,
@@ -149,9 +154,11 @@ internal sealed class DynamicWallpaperHostServer : IDisposable
             {
                 case "ping": return new DynamicHostResponse(true);
                 case "apply" when !string.IsNullOrWhiteSpace(request.Path):
+                    await CancelPendingRestoreAsync();
                     await _engine.ApplyAsync(request.Path);
                     return new DynamicHostResponse(true);
                 case "stop":
+                    await CancelPendingRestoreAsync();
                     _engine.Stop();
                     _stopping = true;
                     return new DynamicHostResponse(true);
@@ -164,15 +171,35 @@ internal sealed class DynamicWallpaperHostServer : IDisposable
         }
     }
 
-    private async Task RestoreLastDynamicWallpaperAsync()
+    private async Task CancelPendingRestoreAsync()
     {
-        var settings = await new SettingsService(_paths).LoadAsync();
-        var path = settings.CurrentWallpaperPath;
-        var isVideo = settings.CurrentWallpaperMediaType == WallpaperMediaType.Video ||
-            (settings.CurrentWallpaperMediaType is null && string.Equals(Path.GetExtension(path), ".mp4",
-                StringComparison.OrdinalIgnoreCase));
-        if (!isVideo || string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return;
-        try { await _engine.ApplyAsync(path); }
+        _restoreCancellation.Cancel();
+        if (_restoreTask is null) return;
+        await _restoreTask;
+        _restoreTask = null;
+    }
+
+    private async Task RestoreLastDynamicWallpaperAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            // A freshly launched UI sends its explicit apply request almost
+            // immediately. Give that request priority and only auto-restore
+            // when the host was started on its own at Windows sign-in.
+            await Task.Delay(1000, cancellationToken);
+            var settings = await new SettingsService(_paths).LoadAsync();
+            cancellationToken.ThrowIfCancellationRequested();
+            var path = settings.CurrentWallpaperPath;
+            var isVideo = settings.CurrentWallpaperMediaType == WallpaperMediaType.Video ||
+                (settings.CurrentWallpaperMediaType is null && string.Equals(Path.GetExtension(path), ".mp4",
+                    StringComparison.OrdinalIgnoreCase));
+            if (!isVideo || string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return;
+            await _engine.ApplyAsync(path, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // An explicit apply/stop request superseded startup restoration.
+        }
         catch (Exception exception)
         {
             await File.AppendAllTextAsync(_paths.Log, $"{DateTime.Now:O} 恢复动态壁纸失败: {exception}\n");
@@ -181,7 +208,9 @@ internal sealed class DynamicWallpaperHostServer : IDisposable
 
     public void Dispose()
     {
+        _restoreCancellation.Cancel();
         _engine.Stop();
+        _restoreCancellation.Dispose();
         _mutex?.Dispose();
     }
 }
