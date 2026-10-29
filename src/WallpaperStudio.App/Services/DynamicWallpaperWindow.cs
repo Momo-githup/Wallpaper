@@ -85,14 +85,22 @@ internal sealed class DynamicWallpaperWindow : IDisposable
 
     public async Task WaitUntilOpenedAsync(CancellationToken cancellationToken)
     {
-        try
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(20);
+        while (DateTime.UtcNow < deadline)
         {
-            await _opened.Task.WaitAsync(TimeSpan.FromSeconds(12), cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_opened.Task.IsCompleted)
+            {
+                await _opened.Task;
+                return;
+            }
+            // Do not depend solely on an event callback. During rapid host
+            // replacement LibVLC can already be playing before its managed
+            // event is dispatched.
+            if (_player?.IsPlaying == true) return;
+            await Task.Delay(100, cancellationToken);
         }
-        catch (TimeoutException exception)
-        {
-            throw new InvalidOperationException("视频加载超时，请尝试 MP4（H.264）格式。", exception);
-        }
+        throw new InvalidOperationException($"视频加载超时（播放器状态：{_player?.State}），请尝试 MP4（H.264）格式。");
     }
 
     public void StopPlayback()

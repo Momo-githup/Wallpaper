@@ -22,7 +22,11 @@ public sealed class DynamicWallpaperHostClient
     {
         if (!File.Exists(path)) throw new FileNotFoundException("视频文件不存在。", path);
         await EnsureHostAsync(cancellationToken);
-        var response = await SendAsync(new DynamicHostRequest("apply", path), TimeSpan.FromSeconds(35), cancellationToken);
+        // A never-before-used video may require a bootstrap decode, snapshot,
+        // Explorer refresh and then the real playback startup. Keep the client
+        // connected for the full bounded operation so it does not abandon a
+        // healthy host halfway through that first-time preparation.
+        var response = await SendAsync(new DynamicHostRequest("apply", path), TimeSpan.FromSeconds(60), cancellationToken);
         if (!response.Success) throw new InvalidOperationException(response.Error ?? "动态壁纸引擎启动失败。");
     }
 
@@ -30,7 +34,7 @@ public sealed class DynamicWallpaperHostClient
     {
         try
         {
-            var response = await SendAsync(new DynamicHostRequest("stop"), TimeSpan.FromMilliseconds(500), cancellationToken);
+            var response = await SendAsync(new DynamicHostRequest("stop"), TimeSpan.FromSeconds(5), cancellationToken);
             if (!response.Success) throw new InvalidOperationException(response.Error ?? "无法停止动态壁纸引擎。");
         }
         catch (TimeoutException)
@@ -67,7 +71,7 @@ public sealed class DynamicWallpaperHostClient
     {
         try
         {
-            var response = await SendAsync(new DynamicHostRequest("ping"), TimeSpan.FromMilliseconds(150), cancellationToken);
+            var response = await SendAsync(new DynamicHostRequest("ping"), TimeSpan.FromMilliseconds(750), cancellationToken);
             return response.Success;
         }
         catch (TimeoutException) { return false; }
@@ -131,24 +135,40 @@ internal sealed class DynamicWallpaperHostServer : IDisposable
         _restoreTask = RestoreLastDynamicWallpaperAsync(_restoreCancellation.Token);
         while (!_stopping)
         {
-            await using var pipe = new NamedPipeServerStream(DynamicWallpaperHostProtocol.PipeName,
-                PipeDirection.InOut, 1, PipeTransmissionMode.Byte,
-                PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
-            await pipe.WaitForConnectionAsync();
-            using var reader = new StreamReader(pipe, leaveOpen: true);
-            using var writer = new StreamWriter(pipe, leaveOpen: true) { AutoFlush = true };
-            var line = await reader.ReadLineAsync();
-            var response = await HandleAsync(line);
-            await writer.WriteLineAsync(JsonSerializer.Serialize(response, DynamicWallpaperHostProtocol.JsonOptions));
+            try
+            {
+                await ProcessNextConnectionAsync();
+            }
+            catch (IOException exception)
+            {
+                // A client may time out and close its end while an apply request
+                // is still completing. That connection is gone, but the host
+                // and the successfully started wallpaper must remain alive.
+                await AppendLogAsync($"动态壁纸客户端已断开，宿主继续运行: {exception.Message}");
+            }
         }
         _ = _dispatcher.BeginInvoke(System.Windows.Application.Current.Shutdown);
     }
 
+    private async Task ProcessNextConnectionAsync()
+    {
+        await using var pipe = new NamedPipeServerStream(DynamicWallpaperHostProtocol.PipeName,
+            PipeDirection.InOut, 1, PipeTransmissionMode.Byte,
+            PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+        await pipe.WaitForConnectionAsync();
+        using var reader = new StreamReader(pipe, leaveOpen: true);
+        using var writer = new StreamWriter(pipe, leaveOpen: true) { AutoFlush = true };
+        var line = await reader.ReadLineAsync();
+        var response = await HandleAsync(line);
+        await writer.WriteLineAsync(JsonSerializer.Serialize(response, DynamicWallpaperHostProtocol.JsonOptions));
+    }
+
     private async Task<DynamicHostResponse> HandleAsync(string? line)
     {
+        DynamicHostRequest? request = null;
         try
         {
-            var request = line is null ? null : JsonSerializer.Deserialize<DynamicHostRequest>(line,
+            request = line is null ? null : JsonSerializer.Deserialize<DynamicHostRequest>(line,
                 DynamicWallpaperHostProtocol.JsonOptions);
             switch (request?.Command)
             {
@@ -167,9 +187,13 @@ internal sealed class DynamicWallpaperHostServer : IDisposable
         }
         catch (Exception exception)
         {
+            await AppendLogAsync($"动态壁纸命令 {request?.Command ?? "unknown"} 失败: {exception}");
             return new DynamicHostResponse(false, exception.Message);
         }
     }
+
+    private Task AppendLogAsync(string message) =>
+        File.AppendAllTextAsync(_paths.Log, $"{DateTime.Now:O} {message}\n");
 
     private async Task CancelPendingRestoreAsync()
     {
