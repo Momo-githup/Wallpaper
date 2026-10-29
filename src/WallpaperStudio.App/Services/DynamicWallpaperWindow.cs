@@ -2,19 +2,24 @@ using LibVLCSharp.Shared;
 using Microsoft.Win32;
 using System.Runtime.InteropServices;
 using System.Windows.Interop;
+using System.Windows.Threading;
 
 namespace WallpaperStudio.App.Services;
 
 internal sealed class DynamicWallpaperWindow : IDisposable
 {
+    private const long LoopSeekLeadMilliseconds = 80;
+
     private readonly string _path;
     private readonly TaskCompletionSource _opened = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private HwndSource? _source;
     private LibVLC? _libVlc;
     private MediaPlayer? _player;
     private Media? _media;
+    private DispatcherTimer? _loopTimer;
     private IntPtr _desktopHost;
     private IntPtr _desktopIconView;
+    private bool _loopSeekPending;
     private bool _disposed;
 
     public DynamicWallpaperWindow(string path)
@@ -59,6 +64,12 @@ internal sealed class DynamicWallpaperWindow : IDisposable
         _player.Playing += OnPlaying;
         _player.EndReached += OnEndReached;
         _player.EncounteredError += OnEncounteredError;
+        _loopTimer = new DispatcherTimer(DispatcherPriority.Render, _source.Dispatcher)
+        {
+            Interval = TimeSpan.FromMilliseconds(10)
+        };
+        _loopTimer.Tick += OnLoopTimerTick;
+        _loopTimer.Start();
         _media = new Media(_libVlc, new Uri(_path));
         _media.AddOption(":input-repeat=-1");
         _media.AddOption(":no-audio");
@@ -88,6 +99,12 @@ internal sealed class DynamicWallpaperWindow : IDisposable
         if (_disposed) return;
         _disposed = true;
         SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
+        if (_loopTimer is not null)
+        {
+            _loopTimer.Stop();
+            _loopTimer.Tick -= OnLoopTimerTick;
+            _loopTimer = null;
+        }
         if (_player is not null)
         {
             _player.Playing -= OnPlaying;
@@ -112,6 +129,29 @@ internal sealed class DynamicWallpaperWindow : IDisposable
 
     private void OnPlaying(object? sender, EventArgs e) => _opened.TrySetResult();
 
+    private void OnLoopTimerTick(object? sender, EventArgs e)
+    {
+        if (_disposed || _player is null || !_player.IsPlaying) return;
+
+        var length = _player.Length;
+        var time = _player.Time;
+        if (length <= 0 || time < 0) return;
+
+        // Do not let VLC reach the real end of the stream. At EOF its WinGDI
+        // video output can be destroyed for one paint, exposing Explorer's
+        // static wallpaper. Seeking while the player is still running keeps
+        // the same output HWND alive across the loop boundary.
+        if (time < length - LoopSeekLeadMilliseconds)
+        {
+            _loopSeekPending = false;
+            return;
+        }
+
+        if (_loopSeekPending) return;
+        _loopSeekPending = true;
+        _player.Time = 0;
+    }
+
     private void OnEndReached(object? sender, EventArgs e)
     {
         // input-repeat normally loops inside VLC without closing the video output.
@@ -120,6 +160,7 @@ internal sealed class DynamicWallpaperWindow : IDisposable
         System.Windows.Application.Current.Dispatcher.BeginInvoke(() =>
         {
             if (_disposed || _player is null || _media is null) return;
+            _loopSeekPending = false;
             _player.Play(_media);
         });
     }
