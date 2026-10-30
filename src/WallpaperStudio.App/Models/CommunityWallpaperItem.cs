@@ -11,7 +11,8 @@ public sealed record CommunityWallpaperItem(
     int PixelHeight,
     long FileSize,
     string MimeType,
-    DateTime CreatedAt)
+    DateTime CreatedAt,
+    bool IsOwnedByCurrentUser)
 {
     public string Resolution => $"{PixelWidth} × {PixelHeight}";
     public string FileSizeText => FileSize switch

@@ -7,6 +7,7 @@ namespace WallpaperStudio.App;
 public partial class LoginWindow : Window
 {
     private readonly MainViewModel _viewModel;
+    private bool _awaitingVerification;
 
     public LoginWindow(MainViewModel viewModel)
     {
@@ -26,6 +27,12 @@ public partial class LoginWindow : Window
 
     private async void SignUp_Click(object sender, RoutedEventArgs e)
     {
+        if (_awaitingVerification)
+        {
+            await CompleteRegistrationAsync();
+            return;
+        }
+
         if (!ValidateCommonFields()) return;
         await RunAsync(async () =>
         {
@@ -37,12 +44,17 @@ public partial class LoginWindow : Window
             }
 
             MessageText.Foreground = System.Windows.Media.Brushes.LightGreen;
-            MessageText.Text = result.Message;
+            MessageText.Text = "验证码已发送，请输入邮箱收到的验证码。";
+            _awaitingVerification = true;
+            VerificationPanel.Visibility = Visibility.Visible;
+            SignUpButton.Content = "完成注册";
+            EmailBox.IsReadOnly = true;
+            PasswordBox.IsEnabled = false;
             VerificationCodeBox.Focus();
         });
     }
 
-    private async void VerifyCode_Click(object sender, RoutedEventArgs e)
+    private async Task CompleteRegistrationAsync()
     {
         if (!ValidateEmail()) return;
         var code = VerificationCodeBox.Text.Trim();
@@ -108,11 +120,10 @@ public partial class LoginWindow : Window
 
     private void SetBusy(bool busy)
     {
-        SignInButton.IsEnabled = !busy;
+        SignInButton.IsEnabled = !busy && !_awaitingVerification;
         SignUpButton.IsEnabled = !busy;
-        VerifyCodeButton.IsEnabled = !busy;
         EmailBox.IsEnabled = !busy;
-        PasswordBox.IsEnabled = !busy;
+        PasswordBox.IsEnabled = !busy && !_awaitingVerification;
         VerificationCodeBox.IsEnabled = !busy;
     }
 }

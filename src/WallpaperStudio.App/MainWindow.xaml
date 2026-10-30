@@ -79,7 +79,21 @@
                     <TextBlock Text="社区壁纸" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,12"/>
                     <Border Grid.Row="1" Background="#11141A" CornerRadius="8" ClipToBounds="True"><Image Source="{Binding SelectedCommunityWallpaper.ThumbnailUrl, Mode=OneWay}" Stretch="Uniform"/></Border>
                     <StackPanel Grid.Row="2" Margin="0,14,0,0"><TextBlock Text="{Binding SelectedCommunityWallpaper.Title, Mode=OneWay, TargetNullValue=请选择一张社区壁纸}" FontSize="18" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/><TextBlock Foreground="{StaticResource MutedBrush}" Margin="0,6,0,0"><Run Text="作者："/><Run Text="{Binding SelectedCommunityWallpaper.AuthorName, Mode=OneWay}"/></TextBlock><TextBlock Foreground="{StaticResource MutedBrush}" Margin="0,5,0,0"><Run Text="{Binding SelectedCommunityWallpaper.Resolution, Mode=OneWay}"/><Run Text="  ·  "/><Run Text="{Binding SelectedCommunityWallpaper.FileSizeText, Mode=OneWay}"/></TextBlock></StackPanel>
-                    <Button Grid.Row="3" Content="下载壁纸" Command="{Binding DownloadCommunityWallpaperCommand}" Style="{StaticResource PrimaryButton}" Margin="0"/>
+                    <StackPanel Grid.Row="3">
+                        <Button Content="下载壁纸" Command="{Binding DownloadCommunityWallpaperCommand}" Style="{StaticResource PrimaryButton}" Margin="0"/>
+                        <Button Content="撤下壁纸" Command="{Binding WithdrawCommunityWallpaperCommand}" Margin="0,10,0,0">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding SelectedCommunityWallpaper.IsOwnedByCurrentUser}" Value="True">
+                                            <Setter Property="Visibility" Value="Visible"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
+                    </StackPanel>
                 </Grid>
             </Border>
         </Grid>

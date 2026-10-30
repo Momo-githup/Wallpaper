@@ -60,7 +60,7 @@ public sealed class ImageService
         return cachePath;
     }
 
-    public async Task<CommunityUploadFiles> PrepareCommunityFilesAsync(string path)
+    public async Task<CommunityUploadFiles> PrepareCommunityFilesAsync(string path, CancellationToken cancellationToken = default)
     {
         if (!File.Exists(path)) throw new FileNotFoundException("图片文件不存在。", path);
         var extension = Path.GetExtension(path).ToLowerInvariant();
@@ -94,8 +94,16 @@ public sealed class ImageService
         var thumbnailPath = GetCachePath(path, "thumb", ".jpg");
         if (!File.Exists(thumbnailPath) || File.GetLastWriteTimeUtc(thumbnailPath) < File.GetLastWriteTimeUtc(path))
             await Task.Run(() => CreateThumbnail(path, thumbnailPath));
+
+        await using var content = new FileStream(uploadPath, FileMode.Open, FileAccess.Read, FileShare.Read,
+            81920, FileOptions.Asynchronous | FileOptions.SequentialScan);
+        var contentHash = Convert.ToHexString(await SHA256.HashDataAsync(content, cancellationToken)).ToLowerInvariant();
+        content.Position = 0;
+#pragma warning disable CA5351 // MD5 is used only to match legacy Storage ETags, not for security.
+        var legacyETag = Convert.ToHexString(await MD5.HashDataAsync(content, cancellationToken)).ToLowerInvariant();
+#pragma warning restore CA5351
         return new CommunityUploadFiles(uploadPath, thumbnailPath, extension, mimeType,
-            info.Width, info.Height, info.Size);
+            info.Width, info.Height, info.Size, contentHash, legacyETag);
     }
 
     public static BitmapImage LoadBitmap(string path)
@@ -157,4 +165,6 @@ public sealed record CommunityUploadFiles(
     string MimeType,
     int Width,
     int Height,
-    long FileSize);
+    long FileSize,
+    string ContentHash,
+    string LegacyETag);

@@ -1,4 +1,5 @@
 using Supabase.Gotrue;
+using Supabase.Gotrue.Exceptions;
 using WallpaperStudio.App.Models;
 
 namespace WallpaperStudio.App.Services;
@@ -25,9 +26,24 @@ public sealed class SupabaseAuthService : IAuthService
     public async Task SignInAsync(string email, string password)
     {
         await EnsureInitializedAsync();
-        var session = await _client.Auth.SignIn(email.Trim(), password);
-        if (string.IsNullOrWhiteSpace(session?.AccessToken))
-            throw new InvalidOperationException("登录未返回有效会话，请确认邮箱已经验证。 ");
+        try
+        {
+            var session = await _client.Auth.SignIn(email.Trim(), password);
+            if (string.IsNullOrWhiteSpace(session?.AccessToken))
+                throw new InvalidOperationException("登录失败，请先注册账号或检查密码。");
+        }
+        catch (GotrueException exception) when (
+            exception.Reason is FailureHint.Reason.UserBadLogin or FailureHint.Reason.UserBadPassword ||
+            string.Equals(exception.ErrorCode, "invalid_credentials", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("登录失败，请先注册账号或检查邮箱和密码。", exception);
+        }
+        catch (GotrueException exception) when (
+            exception.Reason is FailureHint.Reason.UserEmailNotConfirmed ||
+            string.Equals(exception.ErrorCode, "email_not_confirmed", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("账号尚未完成注册，请点击注册并输入邮箱收到的验证码。", exception);
+        }
     }
 
     public async Task<SignUpResult> SignUpAsync(string email, string password)

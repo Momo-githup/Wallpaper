@@ -42,7 +42,7 @@ public sealed partial class MainViewModel : ObservableObject
     private WallpaperCardViewModel? selectedWallpaper;
 
     [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(DownloadCommunityWallpaperCommand))]
+    [NotifyCanExecuteChangedFor(nameof(DownloadCommunityWallpaperCommand), nameof(WithdrawCommunityWallpaperCommand))]
     private CommunityWallpaperItem? selectedCommunityWallpaper;
 
     [ObservableProperty]
@@ -185,6 +185,8 @@ public sealed partial class MainViewModel : ObservableObject
 
     private bool HasCommunitySelection() => SelectedCommunityWallpaper is not null;
 
+    private bool CanWithdrawCommunityWallpaper() => SelectedCommunityWallpaper?.IsOwnedByCurrentUser == true;
+
     [RelayCommand(CanExecute = nameof(HasCommunitySelection))]
     private async Task DownloadCommunityWallpaperAsync()
     {
@@ -207,6 +209,37 @@ public sealed partial class MainViewModel : ObservableObject
         {
             StatusMessage = "下载失败";
             MessageBox.Show(exception.Message, "下载社区壁纸失败", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    [RelayCommand(CanExecute = nameof(CanWithdrawCommunityWallpaper))]
+    private async Task WithdrawCommunityWallpaperAsync()
+    {
+        if (SelectedCommunityWallpaper is not { IsOwnedByCurrentUser: true } wallpaper) return;
+        var confirmation = MessageBox.Show(
+            $"确定要撤下“{wallpaper.Title}”吗？\n撤下后将从社区隐藏，并删除云端文件。",
+            "撤下社区壁纸",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning);
+        if (confirmation != MessageBoxResult.Yes) return;
+
+        IsBusy = true;
+        try
+        {
+            var filesDeleted = await _communityService.WithdrawAsync(wallpaper);
+            await ReloadCommunityAsync();
+            StatusMessage = filesDeleted
+                ? $"已撤下：{wallpaper.Title}"
+                : $"已撤下：{wallpaper.Title}（云端文件清理失败）";
+        }
+        catch (Exception exception)
+        {
+            StatusMessage = "撤下失败";
+            MessageBox.Show(exception.Message, "撤下社区壁纸失败", MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
         {

@@ -1,5 +1,7 @@
 using System.Net.Http;
+using Supabase.Postgrest.Exceptions;
 using Supabase.Storage;
+using Supabase.Storage.Interfaces;
 using WallpaperStudio.App.Models;
 
 namespace WallpaperStudio.App.Services;
@@ -30,6 +32,7 @@ public sealed class SupabaseCommunityService : ICommunityService
             .Get(cancellationToken);
         var names = profileResponse.Models.ToDictionary(profile => profile.Id, profile => profile.DisplayName);
         var bucket = client.Storage.From(BucketName);
+        var currentUserId = client.Auth.CurrentUser?.Id;
 
         return wallpaperResponse.Models.Select(wallpaper => new CommunityWallpaperItem(
             wallpaper.Id,
@@ -42,7 +45,8 @@ public sealed class SupabaseCommunityService : ICommunityService
             wallpaper.Height,
             wallpaper.FileSize,
             wallpaper.MimeType,
-            wallpaper.CreatedAt)).ToList();
+            wallpaper.CreatedAt,
+            string.Equals(wallpaper.OwnerId, currentUserId, StringComparison.OrdinalIgnoreCase))).ToList();
     }
 
     public async Task PublishAsync(WallpaperItem wallpaper, CancellationToken cancellationToken = default)
@@ -53,7 +57,17 @@ public sealed class SupabaseCommunityService : ICommunityService
         var client = await GetAuthenticatedClientAsync();
         var userId = client.Auth.CurrentUser?.Id
             ?? throw new InvalidOperationException("登录状态已失效，请重新登录。");
-        var files = await _images.PrepareCommunityFilesAsync(wallpaper.FilePath);
+        var files = await _images.PrepareCommunityFilesAsync(wallpaper.FilePath, cancellationToken);
+        var publishedResponse = await client.From<CommunityWallpaperRecord>()
+            .Select(record => new object[] { record.Id, record.StoragePath, record.ContentHash! })
+            .Where(record => record.Status == "published")
+            .Get(cancellationToken);
+        if (publishedResponse.Models.Any(record =>
+                string.Equals(record.ContentHash, files.ContentHash, StringComparison.OrdinalIgnoreCase)) ||
+            await MatchesLegacyWallpaperAsync(client.Storage.From(BucketName), publishedResponse.Models,
+                files.LegacyETag, cancellationToken))
+            throw new InvalidOperationException("这张壁纸已经发布到社区，不能重复发布。");
+
         var key = Guid.NewGuid().ToString("N");
         var storagePath = $"{userId}/{key}{files.Extension}";
         var thumbnailPath = $"{userId}/thumbnails/{key}.jpg";
@@ -82,15 +96,22 @@ public sealed class SupabaseCommunityService : ICommunityService
                 Height = files.Height,
                 FileSize = files.FileSize,
                 MimeType = files.MimeType,
+                ContentHash = files.ContentHash,
                 Status = "published"
             }, cancellationToken: cancellationToken);
         }
-        catch
+        catch (Exception exception)
         {
             if (uploadedPaths.Count > 0)
             {
                 try { await bucket.Remove(uploadedPaths); }
                 catch { /* Preserve the original publication error. */ }
+            }
+            if (exception is PostgrestException postgrestException &&
+                (postgrestException.StatusCode == 409 ||
+                 postgrestException.Content?.Contains("community_wallpapers_active_content_hash_key", StringComparison.OrdinalIgnoreCase) == true))
+            {
+                throw new InvalidOperationException("这张壁纸已经发布到社区，不能重复发布。", exception);
             }
             throw;
         }
@@ -107,6 +128,35 @@ public sealed class SupabaseCommunityService : ICommunityService
         await source.CopyToAsync(target, cancellationToken);
     }
 
+    public async Task<bool> WithdrawAsync(CommunityWallpaperItem wallpaper,
+        CancellationToken cancellationToken = default)
+    {
+        var client = await GetAuthenticatedClientAsync();
+        var userId = client.Auth.CurrentUser?.Id
+            ?? throw new InvalidOperationException("登录状态已失效，请重新登录。");
+        if (!wallpaper.IsOwnedByCurrentUser)
+            throw new InvalidOperationException("只能撤下自己发布的壁纸。");
+
+        var response = await client.From<CommunityWallpaperRecord>()
+            .Set(record => record.Status, "removed")
+            .Where(record => record.Id == wallpaper.Id)
+            .Where(record => record.OwnerId == userId)
+            .Update(cancellationToken: cancellationToken);
+        if (response.Models.Count == 0)
+            throw new InvalidOperationException("壁纸不存在，或当前账户无权撤下。");
+
+        try
+        {
+            await client.Storage.From(BucketName).Remove([wallpaper.StoragePath, response.Models[0].ThumbnailPath]);
+            return true;
+        }
+        catch
+        {
+            // The database record is already hidden. Report incomplete cleanup without exposing it again.
+            return false;
+        }
+    }
+
     private async Task<Supabase.Client> GetAuthenticatedClientAsync()
     {
         await _provider.InitializeAsync();
@@ -114,5 +164,20 @@ public sealed class SupabaseCommunityService : ICommunityService
         if (string.IsNullOrWhiteSpace(client.Auth.CurrentSession?.AccessToken))
             throw new InvalidOperationException("请先登录后使用壁纸社区。");
         return client;
+    }
+
+    private static async Task<bool> MatchesLegacyWallpaperAsync(IStorageFileApi<FileObject> bucket,
+        IEnumerable<CommunityWallpaperRecord> records, string localETag, CancellationToken cancellationToken)
+    {
+        foreach (var record in records.Where(record => string.IsNullOrWhiteSpace(record.ContentHash)))
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Head,
+                bucket.GetPublicUrl(record.StoragePath, null!, null));
+            using var response = await Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            if (!response.IsSuccessStatusCode) continue;
+            var remoteETag = response.Headers.ETag?.Tag?.Trim('"');
+            if (string.Equals(remoteETag, localETag, StringComparison.OrdinalIgnoreCase)) return true;
+        }
+        return false;
     }
 }
