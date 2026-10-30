@@ -297,6 +297,11 @@
         "resolved": "8.0.5",
         "contentHash": "0f1B50Ss7rqxXiaBJyzUu9bWFOO2/zSlifZ/UNMdiIpDYe4cY4LQQicP4nirK1OS31I43rn062UIJ1Q9bpmHpg=="
       },
+      "Velopack": {
+        "type": "Transitive",
+        "resolved": "1.2.161",
+        "contentHash": "OpHNacIumnkhaaX3ZlQ/TCR4YPOJvud2/PAOoWb6o+mIrLwIVA275I5wAgt4q/1O2VrJeDwR1qFQyqzG4lUArg=="
+      },
       "VideoLAN.LibVLC.Windows": {
         "type": "Transitive",
         "resolved": "3.0.24",
@@ -362,6 +367,7 @@
           "SkiaSharp.NativeAssets.Win32": "[4.154.0, )",
           "Supabase": "[8.5.1, )",
           "System.Security.Cryptography.ProtectedData": "[8.0.0, )",
+          "Velopack": "[1.2.161, )",
           "VideoLAN.LibVLC.Windows": "[3.0.24, )"
         }
       }
