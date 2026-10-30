@@ -254,11 +254,9 @@ public sealed partial class MainViewModel : ObservableObject
         IsBusy = true;
         try
         {
-            var filesDeleted = await _communityService.WithdrawAsync(wallpaper);
+            await _communityService.WithdrawAsync(wallpaper);
             await ReloadCommunityAsync();
-            StatusMessage = filesDeleted
-                ? $"已撤下：{wallpaper.Title}"
-                : $"已撤下：{wallpaper.Title}（云端文件清理失败）";
+            StatusMessage = $"已撤下并删除云端文件：{wallpaper.Title}";
         }
         catch (Exception exception)
         {

@@ -1,4 +1,7 @@
 using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
+using System.Text.Json;
 using Supabase.Postgrest.Exceptions;
 using Supabase.Storage;
 using Supabase.Storage.Interfaces;
@@ -22,6 +25,7 @@ public sealed class SupabaseCommunityService : ICommunityService
     public async Task<IReadOnlyList<CommunityWallpaperItem>> GetFeedAsync(CancellationToken cancellationToken = default)
     {
         var client = await GetAuthenticatedClientAsync();
+        await InvokeWithdrawalFunctionAsync(new { cleanupRemoved = true }, cancellationToken);
         var wallpaperResponse = await client.From<CommunityWallpaperRecord>()
             .Where(wallpaper => wallpaper.Status == "published")
             .Order(wallpaper => wallpaper.CreatedAt, Supabase.Postgrest.Constants.Ordering.Descending)
@@ -131,32 +135,51 @@ public sealed class SupabaseCommunityService : ICommunityService
         await source.CopyToAsync(target, cancellationToken);
     }
 
-    public async Task<bool> WithdrawAsync(CommunityWallpaperItem wallpaper,
+    public async Task WithdrawAsync(CommunityWallpaperItem wallpaper,
         CancellationToken cancellationToken = default)
     {
         var client = await GetAuthenticatedClientAsync();
-        var userId = client.Auth.CurrentUser?.Id
+        var accessToken = client.Auth.CurrentSession?.AccessToken
             ?? throw new InvalidOperationException("登录状态已失效，请重新登录。");
         if (!wallpaper.IsOwnedByCurrentUser)
             throw new InvalidOperationException("只能撤下自己发布的壁纸。");
 
-        var response = await client.From<CommunityWallpaperRecord>()
-            .Set(record => record.Status, "removed")
-            .Where(record => record.Id == wallpaper.Id)
-            .Where(record => record.OwnerId == userId)
-            .Update(cancellationToken: cancellationToken);
-        if (response.Models.Count == 0)
-            throw new InvalidOperationException("壁纸不存在，或当前账户无权撤下。");
+        await InvokeWithdrawalFunctionAsync(new { wallpaperId = wallpaper.Id }, cancellationToken, accessToken);
+    }
 
+    private async Task InvokeWithdrawalFunctionAsync(object payload, CancellationToken cancellationToken,
+        string? accessToken = null)
+    {
+        var client = await GetAuthenticatedClientAsync();
+        accessToken ??= client.Auth.CurrentSession?.AccessToken
+            ?? throw new InvalidOperationException("登录状态已失效，请重新登录。");
+        using var request = new HttpRequestMessage(HttpMethod.Post,
+            $"{SupabaseConfiguration.Url.TrimEnd('/')}/functions/v1/withdraw-community-wallpaper");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        request.Headers.Add("apikey", SupabaseConfiguration.PublishableKey);
+        request.Content = JsonContent.Create(payload);
+        using var response = await Http.SendAsync(request, cancellationToken);
+        var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (response.IsSuccessStatusCode) return;
+
+        var message = TryReadFunctionError(responseBody)
+            ?? $"云端撤下失败（HTTP {(int)response.StatusCode}）。";
+        throw new InvalidOperationException(message);
+    }
+
+    private static string? TryReadFunctionError(string responseBody)
+    {
+        if (string.IsNullOrWhiteSpace(responseBody)) return null;
         try
         {
-            await client.Storage.From(BucketName).Remove([wallpaper.StoragePath, response.Models[0].ThumbnailPath]);
-            return true;
+            using var document = JsonDocument.Parse(responseBody);
+            return document.RootElement.TryGetProperty("error", out var error)
+                ? error.GetString()
+                : null;
         }
-        catch
+        catch (JsonException)
         {
-            // The database record is already hidden. Report incomplete cleanup without exposing it again.
-            return false;
+            return null;
         }
     }
 
