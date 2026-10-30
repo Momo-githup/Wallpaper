@@ -36,6 +36,11 @@ public partial class MainWindow : Window
         new LoginWindow(_viewModel) { Owner = this }.ShowDialog();
     }
 
+    private void Account_Click(object sender, RoutedEventArgs e)
+    {
+        new AccountWindow(_viewModel) { Owner = this }.ShowDialog();
+    }
+
     private void Window_DragOver(object sender, System.Windows.DragEventArgs e)
     {
         e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None;

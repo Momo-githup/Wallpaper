@@ -1,0 +1,33 @@
+<Window x:Class="WallpaperStudio.App.AccountWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="账户资料" Width="420" SizeToContent="Height" ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner" Background="{StaticResource WindowBrush}">
+    <Grid Margin="32">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Text="账户资料" FontSize="24" FontWeight="SemiBold"/>
+        <StackPanel Grid.Row="1" Margin="0,22,0,0">
+            <TextBlock Text="邮箱" Margin="0,0,0,6"/>
+            <TextBox x:Name="EmailBox" Height="38" Padding="10,6" IsReadOnly="True"/>
+        </StackPanel>
+        <StackPanel Grid.Row="2" Margin="0,16,0,0">
+            <TextBlock Text="用户名称" Margin="0,0,0,6"/>
+            <TextBox x:Name="DisplayNameBox" Height="38" Padding="10,6" MaxLength="50"/>
+        </StackPanel>
+        <TextBlock x:Name="MessageText" Grid.Row="3" Foreground="#FFFF8A80"
+                   TextWrapping="Wrap" Margin="0,12,0,0" MinHeight="24"/>
+        <Grid Grid.Row="4" Margin="0,10,0,0">
+            <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+            <Button Content="取消" Click="Cancel_Click" Margin="0,0,6,0"/>
+            <Button x:Name="SaveButton" Grid.Column="1" Content="保存名称" Click="Save_Click"
+                    Style="{StaticResource PrimaryButton}" Margin="6,0,0,0"/>
+        </Grid>
+    </Grid>
+</Window>

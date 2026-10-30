@@ -61,6 +61,9 @@ public sealed partial class MainViewModel : ObservableObject
     [ObservableProperty]
     private string currentUserEmail = string.Empty;
 
+    [ObservableProperty]
+    private string currentUserName = string.Empty;
+
     public event Func<string, WallpaperMediaType, Task>? PreviewRequested;
 
     public async Task InitializeAsync()
@@ -93,7 +96,7 @@ public sealed partial class MainViewModel : ObservableObject
     {
         await _authService.SignInAsync(email, password);
         RefreshAuthState();
-        StatusMessage = $"已登录：{CurrentUserEmail}";
+        StatusMessage = $"已登录：{CurrentUserName}";
     }
 
     public async Task<SignUpResult> SignUpAsync(string email, string password)
@@ -108,7 +111,14 @@ public sealed partial class MainViewModel : ObservableObject
     {
         await _authService.VerifySignUpOtpAsync(email, code);
         RefreshAuthState();
-        StatusMessage = $"注册成功，已登录：{CurrentUserEmail}";
+        StatusMessage = $"注册成功，已登录：{CurrentUserName}";
+    }
+
+    public async Task UpdateDisplayNameAsync(string displayName)
+    {
+        await _authService.UpdateDisplayNameAsync(displayName);
+        RefreshAuthState();
+        StatusMessage = $"用户名称已更新：{CurrentUserName}";
     }
 
     [RelayCommand]
@@ -130,8 +140,10 @@ public sealed partial class MainViewModel : ObservableObject
     {
         IsAuthenticated = _authService.IsAuthenticated;
         CurrentUserEmail = _authService.CurrentUserEmail ?? string.Empty;
+        CurrentUserName = _authService.CurrentDisplayName ?? CurrentUserEmail.Split('@')[0];
         if (!IsAuthenticated)
         {
+            CurrentUserName = string.Empty;
             IsCommunityView = false;
             CommunityWallpapers.Clear();
             SelectedCommunityWallpaper = null;
@@ -195,7 +207,7 @@ public sealed partial class MainViewModel : ObservableObject
         if (SelectedCommunityWallpaper is null) return;
         var dialog = new Microsoft.Win32.SaveFileDialog
         {
-            Title = "保存社区壁纸",
+            Title = "保存并导入社区壁纸",
             FileName = SelectedCommunityWallpaper.SuggestedFileName,
             Filter = SelectedCommunityWallpaper.IsVideo
                 ? "MP4 视频|*.mp4|所有文件|*.*"
@@ -206,8 +218,16 @@ public sealed partial class MainViewModel : ObservableObject
         IsBusy = true;
         try
         {
-            await _communityService.DownloadAsync(SelectedCommunityWallpaper, dialog.FileName);
-            StatusMessage = $"已下载：{SelectedCommunityWallpaper.Title}";
+            var downloadedPath = Path.GetFullPath(dialog.FileName);
+            var title = SelectedCommunityWallpaper.Title;
+            await _communityService.DownloadAsync(SelectedCommunityWallpaper, downloadedPath);
+            await ImportPathsCoreAsync([downloadedPath]);
+            SelectedWallpaper = Wallpapers.FirstOrDefault(item =>
+                item.FilePath.Equals(downloadedPath, StringComparison.OrdinalIgnoreCase));
+            if (SelectedWallpaper is null)
+                throw new InvalidDataException("壁纸已下载，但文件无法导入本地图库。");
+            IsCommunityView = false;
+            StatusMessage = $"已下载并导入：{title}";
         }
         catch (Exception exception)
         {
@@ -326,17 +346,7 @@ public sealed partial class MainViewModel : ObservableObject
         IsBusy = true;
         try
         {
-            var valid = new List<(string Path, int Width, int Height, long Size, WallpaperMediaType MediaType)>();
-            foreach (var candidate in paths.Distinct(StringComparer.OrdinalIgnoreCase))
-            {
-                var path = Path.GetFullPath(candidate);
-                if (!_mediaFiles.IsSupported(path) || !File.Exists(path)) continue;
-                var info = await _mediaFiles.InspectAsync(path);
-                if (info is { } mediaInfo)
-                    valid.Add((path, mediaInfo.Width, mediaInfo.Height, mediaInfo.Size, _mediaFiles.GetMediaType(path)));
-            }
-            var added = await _database.AddAsync(valid);
-            await ReloadAsync();
+            var added = await ImportPathsCoreAsync(paths);
             StatusMessage = added == 0 ? "没有发现新的有效壁纸" : $"已导入 {added} 个壁纸";
         }
         catch (Exception exception)
@@ -348,6 +358,22 @@ public sealed partial class MainViewModel : ObservableObject
         {
             IsBusy = false;
         }
+    }
+
+    private async Task<int> ImportPathsCoreAsync(IEnumerable<string> paths)
+    {
+        var valid = new List<(string Path, int Width, int Height, long Size, WallpaperMediaType MediaType)>();
+        foreach (var candidate in paths.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var path = Path.GetFullPath(candidate);
+            if (!_mediaFiles.IsSupported(path) || !File.Exists(path)) continue;
+            var info = await _mediaFiles.InspectAsync(path);
+            if (info is { } mediaInfo)
+                valid.Add((path, mediaInfo.Width, mediaInfo.Height, mediaInfo.Size, _mediaFiles.GetMediaType(path)));
+        }
+        var added = await _database.AddAsync(valid);
+        await ReloadAsync();
+        return added;
     }
 
     private bool HasSelection() => SelectedWallpaper is not null;
