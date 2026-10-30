@@ -17,10 +17,13 @@ public sealed partial class MainViewModel : ObservableObject
     private readonly WallpaperManager _wallpaperManager;
     private readonly SettingsService _settingsService;
     private readonly StartupService _startupService;
+    private readonly IAuthService _authService;
+    private readonly ICommunityService _communityService;
     private AppSettings _settings = new();
 
     public MainViewModel(LibraryDatabase database, ImageService images, MediaFileService mediaFiles, WallpaperManager wallpaperManager,
-        SettingsService settingsService, StartupService startupService)
+        SettingsService settingsService, StartupService startupService, IAuthService authService,
+        ICommunityService communityService)
     {
         _database = database;
         _images = images;
@@ -28,18 +31,35 @@ public sealed partial class MainViewModel : ObservableObject
         _wallpaperManager = wallpaperManager;
         _settingsService = settingsService;
         _startupService = startupService;
+        _authService = authService;
+        _communityService = communityService;
     }
 
     public ObservableCollection<WallpaperCardViewModel> Wallpapers { get; } = [];
+    public ObservableCollection<CommunityWallpaperItem> CommunityWallpapers { get; } = [];
     [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(ApplyWallpaperCommand), nameof(RemoveCommand), nameof(PreviewCommand))]
+    [NotifyCanExecuteChangedFor(nameof(ApplyWallpaperCommand), nameof(RemoveCommand), nameof(PreviewCommand), nameof(PublishSelectedWallpaperCommand))]
     private WallpaperCardViewModel? selectedWallpaper;
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(DownloadCommunityWallpaperCommand))]
+    private CommunityWallpaperItem? selectedCommunityWallpaper;
+
+    [ObservableProperty]
+    private bool isCommunityView;
 
     [ObservableProperty]
     private bool isBusy;
 
     [ObservableProperty]
     private string statusMessage = "准备就绪";
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(ShowCommunityCommand), nameof(RefreshCommunityCommand), nameof(PublishSelectedWallpaperCommand))]
+    private bool isAuthenticated;
+
+    [ObservableProperty]
+    private string currentUserEmail = string.Empty;
 
     public event Func<string, WallpaperMediaType, Task>? PreviewRequested;
 
@@ -50,6 +70,16 @@ public sealed partial class MainViewModel : ObservableObject
         {
             await _database.InitializeAsync();
             _settings = await _settingsService.LoadAsync();
+            try
+            {
+                await _authService.InitializeAsync();
+                RefreshAuthState();
+            }
+            catch
+            {
+                IsAuthenticated = false;
+                CurrentUserEmail = string.Empty;
+            }
             await ReloadAsync();
             StatusMessage = Wallpapers.Count == 0 ? "导入几张喜欢的图片开始吧" : $"已加载 {Wallpapers.Count} 张壁纸";
         }
@@ -57,6 +87,162 @@ public sealed partial class MainViewModel : ObservableObject
         {
             IsBusy = false;
         }
+    }
+
+    public async Task SignInAsync(string email, string password)
+    {
+        await _authService.SignInAsync(email, password);
+        RefreshAuthState();
+        StatusMessage = $"已登录：{CurrentUserEmail}";
+    }
+
+    public async Task<SignUpResult> SignUpAsync(string email, string password)
+    {
+        var result = await _authService.SignUpAsync(email, password);
+        RefreshAuthState();
+        StatusMessage = result.Message;
+        return result;
+    }
+
+    public async Task VerifySignUpOtpAsync(string email, string code)
+    {
+        await _authService.VerifySignUpOtpAsync(email, code);
+        RefreshAuthState();
+        StatusMessage = $"注册成功，已登录：{CurrentUserEmail}";
+    }
+
+    [RelayCommand]
+    private async Task LogoutAsync()
+    {
+        try
+        {
+            await _authService.SignOutAsync();
+            RefreshAuthState();
+            StatusMessage = "已退出账户，本地图库仍可正常使用";
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(exception.Message, "退出登录失败", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private void RefreshAuthState()
+    {
+        IsAuthenticated = _authService.IsAuthenticated;
+        CurrentUserEmail = _authService.CurrentUserEmail ?? string.Empty;
+        if (!IsAuthenticated)
+        {
+            IsCommunityView = false;
+            CommunityWallpapers.Clear();
+            SelectedCommunityWallpaper = null;
+        }
+    }
+
+    [RelayCommand]
+    private void ShowLibrary()
+    {
+        IsCommunityView = false;
+        StatusMessage = Wallpapers.Count == 0 ? "导入几张喜欢的图片开始吧" : $"已加载 {Wallpapers.Count} 张壁纸";
+    }
+
+    private bool CanUseCommunity() => IsAuthenticated;
+
+    [RelayCommand(CanExecute = nameof(CanUseCommunity))]
+    private async Task ShowCommunityAsync()
+    {
+        IsCommunityView = true;
+        await LoadCommunityAsync();
+    }
+
+    [RelayCommand(CanExecute = nameof(CanUseCommunity))]
+    private async Task RefreshCommunityAsync() => await LoadCommunityAsync();
+
+    private bool CanPublishSelectedWallpaper() =>
+        IsAuthenticated && SelectedWallpaper?.Item.MediaType == WallpaperMediaType.Image;
+
+    [RelayCommand(CanExecute = nameof(CanPublishSelectedWallpaper))]
+    private async Task PublishSelectedWallpaperAsync()
+    {
+        if (SelectedWallpaper is null) return;
+        IsBusy = true;
+        try
+        {
+            await _communityService.PublishAsync(SelectedWallpaper.Item);
+            IsCommunityView = true;
+            await ReloadCommunityAsync();
+            StatusMessage = $"已发布到社区：{SelectedWallpaper.DisplayName}";
+        }
+        catch (Exception exception)
+        {
+            StatusMessage = "发布失败";
+            MessageBox.Show(exception.Message, "发布到社区失败", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private bool HasCommunitySelection() => SelectedCommunityWallpaper is not null;
+
+    [RelayCommand(CanExecute = nameof(HasCommunitySelection))]
+    private async Task DownloadCommunityWallpaperAsync()
+    {
+        if (SelectedCommunityWallpaper is null) return;
+        var dialog = new Microsoft.Win32.SaveFileDialog
+        {
+            Title = "保存社区壁纸",
+            FileName = SelectedCommunityWallpaper.SuggestedFileName,
+            Filter = "图片文件|*.jpg;*.jpeg;*.png;*.webp|所有文件|*.*"
+        };
+        if (dialog.ShowDialog() != true) return;
+
+        IsBusy = true;
+        try
+        {
+            await _communityService.DownloadAsync(SelectedCommunityWallpaper, dialog.FileName);
+            StatusMessage = $"已下载：{SelectedCommunityWallpaper.Title}";
+        }
+        catch (Exception exception)
+        {
+            StatusMessage = "下载失败";
+            MessageBox.Show(exception.Message, "下载社区壁纸失败", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task LoadCommunityAsync()
+    {
+        IsBusy = true;
+        try
+        {
+            await ReloadCommunityAsync();
+            StatusMessage = CommunityWallpapers.Count == 0
+                ? "社区暂时还没有壁纸，发布第一张吧"
+                : $"社区已加载 {CommunityWallpapers.Count} 张壁纸";
+        }
+        catch (Exception exception)
+        {
+            StatusMessage = "加载社区失败";
+            MessageBox.Show(exception.Message, "壁纸社区", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task ReloadCommunityAsync()
+    {
+        var selectedId = SelectedCommunityWallpaper?.Id;
+        var items = await _communityService.GetFeedAsync();
+        CommunityWallpapers.Clear();
+        foreach (var item in items) CommunityWallpapers.Add(item);
+        SelectedCommunityWallpaper = CommunityWallpapers.FirstOrDefault(item => item.Id == selectedId)
+            ?? CommunityWallpapers.FirstOrDefault();
     }
 
     [RelayCommand]

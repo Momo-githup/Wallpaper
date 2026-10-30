@@ -17,6 +17,8 @@
     <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.25" />
     <PackageReference Include="SkiaSharp" Version="4.154.0" />
     <PackageReference Include="SkiaSharp.NativeAssets.Win32" Version="4.154.0" />
+    <PackageReference Include="Supabase" Version="8.5.1" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
     <PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.24" />
   </ItemGroup>
 

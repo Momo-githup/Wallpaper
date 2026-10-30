@@ -60,6 +60,44 @@ public sealed class ImageService
         return cachePath;
     }
 
+    public async Task<CommunityUploadFiles> PrepareCommunityFilesAsync(string path)
+    {
+        if (!File.Exists(path)) throw new FileNotFoundException("图片文件不存在。", path);
+        var extension = Path.GetExtension(path).ToLowerInvariant();
+        var uploadPath = path;
+        var mimeType = extension switch
+        {
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".png" => "image/png",
+            ".webp" => "image/webp",
+            ".bmp" => "image/jpeg",
+            _ => throw new InvalidDataException("社区仅支持 JPG、PNG、WebP 和 BMP 图片。")
+        };
+        if (extension == ".bmp")
+        {
+            uploadPath = GetCachePath(path, "community", ".jpg");
+            if (!File.Exists(uploadPath) || File.GetLastWriteTimeUtc(uploadPath) < File.GetLastWriteTimeUtc(path))
+                await Task.Run(() => ConvertToJpeg(path, uploadPath));
+            extension = ".jpg";
+        }
+        else if (extension == ".jpeg")
+        {
+            extension = ".jpg";
+        }
+
+        var info = await InspectAsync(uploadPath) ?? throw new InvalidDataException("无法读取图片信息。");
+        if (info.Width > 8192 || info.Height > 8192)
+            throw new InvalidDataException("社区图片的宽度和高度不能超过 8192 像素。");
+        if (info.Size > 25L * 1024 * 1024)
+            throw new InvalidDataException("社区图片不能超过 25 MB。");
+
+        var thumbnailPath = GetCachePath(path, "thumb", ".jpg");
+        if (!File.Exists(thumbnailPath) || File.GetLastWriteTimeUtc(thumbnailPath) < File.GetLastWriteTimeUtc(path))
+            await Task.Run(() => CreateThumbnail(path, thumbnailPath));
+        return new CommunityUploadFiles(uploadPath, thumbnailPath, extension, mimeType,
+            info.Width, info.Height, info.Size);
+    }
+
     public static BitmapImage LoadBitmap(string path)
     {
         using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
@@ -101,4 +139,22 @@ public sealed class ImageService
         using var output = File.Create(destination);
         data.SaveTo(output);
     }
+
+    private static void ConvertToJpeg(string source, string destination)
+    {
+        using var bitmap = SKBitmap.Decode(source) ?? throw new InvalidDataException("无法解码图片。");
+        using var image = SKImage.FromBitmap(bitmap);
+        using var data = image.Encode(SKEncodedImageFormat.Jpeg, 90);
+        using var output = File.Create(destination);
+        data.SaveTo(output);
+    }
 }
+
+public sealed record CommunityUploadFiles(
+    string FilePath,
+    string ThumbnailPath,
+    string Extension,
+    string MimeType,
+    int Width,
+    int Height,
+    long FileSize);

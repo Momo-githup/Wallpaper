@@ -1,0 +1,44 @@
+<Window x:Class="WallpaperStudio.App.LoginWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="登录 Wallpaper Studio" Width="430" SizeToContent="Height" ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner" Background="{StaticResource WindowBrush}">
+    <Grid Margin="32">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Text="Wallpaper Studio 账户" FontSize="24" FontWeight="SemiBold"/>
+        <TextBlock Grid.Row="1" Text="登录后即可使用壁纸社区；本地图库无需登录。" Foreground="{StaticResource MutedBrush}" Margin="0,8,0,24"/>
+
+        <StackPanel Grid.Row="2">
+            <TextBlock Text="邮箱" Margin="0,0,0,6"/>
+            <TextBox x:Name="EmailBox" Height="38" Padding="10,6"/>
+        </StackPanel>
+
+        <StackPanel Grid.Row="3" Margin="0,16,0,0">
+            <TextBlock Text="密码" Margin="0,0,0,6"/>
+            <PasswordBox x:Name="PasswordBox" Height="38" Padding="10,6"/>
+        </StackPanel>
+
+        <StackPanel Grid.Row="4" Margin="0,16,0,0">
+            <TextBlock Text="邮箱验证码" Margin="0,0,0,6"/>
+            <TextBox x:Name="VerificationCodeBox" Height="38" Padding="10,6"/>
+        </StackPanel>
+
+        <TextBlock x:Name="MessageText" Grid.Row="5" Foreground="#FFFF8A80" TextWrapping="Wrap" Margin="0,14,0,0" MinHeight="36"/>
+
+        <Grid Grid.Row="6" Margin="0,12,0,0">
+            <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+            <Button x:Name="SignInButton" Content="登录" Click="SignIn_Click" Style="{StaticResource PrimaryButton}" Margin="0,0,6,0"/>
+            <Button x:Name="SignUpButton" Grid.Column="1" Content="注册" Click="SignUp_Click" Margin="6,0,6,0"/>
+            <Button x:Name="VerifyCodeButton" Grid.Column="2" Content="验证并登录" Click="VerifyCode_Click" Margin="6,0,0,0"/>
+        </Grid>
+    </Grid>
+</Window>

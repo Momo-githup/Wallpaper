@@ -9,9 +9,34 @@
         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="40"/></Grid.RowDefinitions>
         <Grid Margin="28,22,28,16"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
             <StackPanel><TextBlock Text="Wallpaper Studio" FontSize="27" FontWeight="SemiBold"/><TextBlock Text="让桌面换一种心情" Foreground="{StaticResource MutedBrush}" Margin="0,4,0,0"/></StackPanel>
-            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"><Button Content="导入图片" Command="{Binding ImportFilesCommand}" Style="{StaticResource PrimaryButton}"/><Button Content="导入文件夹" Command="{Binding ImportFolderCommand}"/></StackPanel>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                <Button Content="本地图库" Command="{Binding ShowLibraryCommand}"/>
+                <Button Content="壁纸社区" Command="{Binding ShowCommunityCommand}" Margin="0,0,12,0"/>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,12,0">
+                    <StackPanel.Style>
+                        <Style TargetType="StackPanel">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                            <Style.Triggers><DataTrigger Binding="{Binding IsAuthenticated}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers>
+                        </Style>
+                    </StackPanel.Style>
+                    <TextBlock Text="{Binding CurrentUserEmail}" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" MaxWidth="180" TextTrimming="CharacterEllipsis" Margin="0,0,8,0"/>
+                    <Button Content="退出" Command="{Binding LogoutCommand}"/>
+                </StackPanel>
+                <Button Content="登录 / 注册" Click="Login_Click" Margin="0,0,12,0">
+                    <Button.Style>
+                        <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                            <Setter Property="Visibility" Value="Visible"/>
+                            <Style.Triggers><DataTrigger Binding="{Binding IsAuthenticated}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers>
+                        </Style>
+                    </Button.Style>
+                </Button>
+                <Button Content="导入图片" Command="{Binding ImportFilesCommand}" Style="{StaticResource PrimaryButton}"/>
+                <Button Content="导入文件夹" Command="{Binding ImportFolderCommand}"/>
+            </StackPanel>
         </Grid>
-        <Grid Grid.Row="1" Margin="28,0,28,16"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="16"/><ColumnDefinition Width="330"/></Grid.ColumnDefinitions>
+        <Grid Grid.Row="1" Margin="28,0,28,16">
+            <Grid.Style><Style TargetType="Grid"><Setter Property="Visibility" Value="Visible"/><Style.Triggers><DataTrigger Binding="{Binding IsCommunityView}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></Grid.Style>
+            <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="16"/><ColumnDefinition Width="330"/></Grid.ColumnDefinitions>
             <Border Background="{StaticResource SurfaceBrush}" CornerRadius="12" Padding="14"><Grid>
                 <ListBox ItemsSource="{Binding Wallpapers}" SelectedItem="{Binding SelectedWallpaper}" Background="Transparent" BorderThickness="0" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                     <ListBox.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ListBox.ItemsPanel>
@@ -26,8 +51,37 @@
             <Border Grid.Column="2" Background="{StaticResource SurfaceBrush}" CornerRadius="12" Padding="18"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="220"/><RowDefinition/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                 <TextBlock Text="当前选择" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,12"/><Border Grid.Row="1" Background="#11141A" CornerRadius="8" ClipToBounds="True"><Grid><Image Source="{Binding SelectedWallpaper.Thumbnail, Mode=OneWay}" Stretch="Uniform"/><TextBlock Text="{Binding SelectedWallpaper.MediaGlyph, Mode=OneWay}" FontSize="64" Foreground="#CCFFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid></Border>
                 <StackPanel Grid.Row="2" Margin="0,14,0,0"><TextBlock Text="{Binding SelectedWallpaper.DisplayName, Mode=OneWay, TargetNullValue=请选择一张壁纸}" FontSize="18" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/><TextBlock Foreground="{StaticResource MutedBrush}" Margin="0,6,0,0"><Run Text="{Binding SelectedWallpaper.Resolution, Mode=OneWay}"/><Run Text="  ·  "/><Run Text="{Binding SelectedWallpaper.FileSizeText, Mode=OneWay}"/></TextBlock><TextBlock Text="{Binding SelectedWallpaper.FilePath, Mode=OneWay}" Foreground="{StaticResource MutedBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,5,0,0"/></StackPanel>
-                <StackPanel Grid.Row="3"><Button Content="设为壁纸" Command="{Binding ApplyWallpaperCommand}" Style="{StaticResource PrimaryButton}" Margin="0,0,0,10"/><Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions><Button Content="全屏预览" Command="{Binding PreviewCommand}" Margin="0,0,5,0"/><Button Grid.Column="1" Content="移出图库" Command="{Binding RemoveCommand}" Margin="5,0,0,0"/></Grid></StackPanel>
+                <StackPanel Grid.Row="3"><Button Content="设为壁纸" Command="{Binding ApplyWallpaperCommand}" Style="{StaticResource PrimaryButton}" Margin="0,0,0,10"/><Button Content="发布到社区" Command="{Binding PublishSelectedWallpaperCommand}" Margin="0,0,0,10"/><Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions><Button Content="全屏预览" Command="{Binding PreviewCommand}" Margin="0,0,5,0"/><Button Grid.Column="1" Content="移出图库" Command="{Binding RemoveCommand}" Margin="5,0,0,0"/></Grid></StackPanel>
             </Grid></Border>
+        </Grid>
+        <Grid Grid.Row="1" Margin="28,0,28,16">
+            <Grid.Style><Style TargetType="Grid"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding IsCommunityView}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></Grid.Style>
+            <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="16"/><ColumnDefinition Width="330"/></Grid.ColumnDefinitions>
+            <Border Background="{StaticResource SurfaceBrush}" CornerRadius="12" Padding="14">
+                <Grid>
+                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                    <Grid Margin="5,2,5,10"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="壁纸社区" FontSize="20" FontWeight="SemiBold" VerticalAlignment="Center"/><Button Grid.Column="1" Content="刷新" Command="{Binding RefreshCommunityCommand}"/></Grid>
+                    <Grid Grid.Row="1">
+                        <ListBox ItemsSource="{Binding CommunityWallpapers, Mode=OneWay}" SelectedItem="{Binding SelectedCommunityWallpaper}" Background="Transparent" BorderThickness="0" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                            <ListBox.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ListBox.ItemsPanel>
+                            <ListBox.ItemContainerStyle><Style TargetType="ListBoxItem"><Setter Property="Margin" Value="5"/><Setter Property="Padding" Value="0"/><Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/><Style.Triggers><Trigger Property="IsSelected" Value="True"><Setter Property="Background" Value="{StaticResource AccentBrush}"/></Trigger></Style.Triggers></Style></ListBox.ItemContainerStyle>
+                            <ListBox.ItemTemplate><DataTemplate><Border Width="205" Height="180" Background="{StaticResource CardBrush}" CornerRadius="8" Padding="5"><Grid><Grid.RowDefinitions><RowDefinition/><RowDefinition Height="58"/></Grid.RowDefinitions>
+                                <Border CornerRadius="5" ClipToBounds="True" Background="#11141A"><Image Source="{Binding ThumbnailUrl, Mode=OneWay}" Stretch="UniformToFill"/></Border>
+                                <Grid Grid.Row="1" Margin="5,6,5,0"><Grid.RowDefinitions><RowDefinition/><RowDefinition/></Grid.RowDefinitions><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="{Binding Title, Mode=OneWay}" TextTrimming="CharacterEllipsis" FontWeight="SemiBold"/><TextBlock Grid.Row="1" Text="{Binding AuthorName, Mode=OneWay}" Foreground="{StaticResource MutedBrush}" TextTrimming="CharacterEllipsis"/><TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding Resolution, Mode=OneWay}" Foreground="{StaticResource MutedBrush}" FontSize="11"/></Grid>
+                            </Grid></Border></DataTemplate></ListBox.ItemTemplate>
+                        </ListBox>
+                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"><StackPanel.Style><Style TargetType="StackPanel"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding CommunityWallpapers.Count, Mode=OneWay}" Value="0"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></StackPanel.Style><TextBlock Text="社区暂时还没有壁纸" FontSize="22" HorizontalAlignment="Center"/><TextBlock Text="从本地图库选择图片并发布" Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0"/></StackPanel>
+                    </Grid>
+                </Grid>
+            </Border>
+            <Border Grid.Column="2" Background="{StaticResource SurfaceBrush}" CornerRadius="12" Padding="18">
+                <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="220"/><RowDefinition/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                    <TextBlock Text="社区壁纸" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,12"/>
+                    <Border Grid.Row="1" Background="#11141A" CornerRadius="8" ClipToBounds="True"><Image Source="{Binding SelectedCommunityWallpaper.ThumbnailUrl, Mode=OneWay}" Stretch="Uniform"/></Border>
+                    <StackPanel Grid.Row="2" Margin="0,14,0,0"><TextBlock Text="{Binding SelectedCommunityWallpaper.Title, Mode=OneWay, TargetNullValue=请选择一张社区壁纸}" FontSize="18" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/><TextBlock Foreground="{StaticResource MutedBrush}" Margin="0,6,0,0"><Run Text="作者："/><Run Text="{Binding SelectedCommunityWallpaper.AuthorName, Mode=OneWay}"/></TextBlock><TextBlock Foreground="{StaticResource MutedBrush}" Margin="0,5,0,0"><Run Text="{Binding SelectedCommunityWallpaper.Resolution, Mode=OneWay}"/><Run Text="  ·  "/><Run Text="{Binding SelectedCommunityWallpaper.FileSizeText, Mode=OneWay}"/></TextBlock></StackPanel>
+                    <Button Grid.Row="3" Content="下载壁纸" Command="{Binding DownloadCommunityWallpaperCommand}" Style="{StaticResource PrimaryButton}" Margin="0"/>
+                </Grid>
+            </Border>
         </Grid>
         <Border Grid.Row="2" Background="#12151C" Padding="28,0"><Grid><TextBlock Text="{Binding StatusMessage}" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/><ProgressBar IsIndeterminate="True" Width="120" Height="3" HorizontalAlignment="Right" VerticalAlignment="Center"><ProgressBar.Style><Style TargetType="ProgressBar"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding IsBusy}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></ProgressBar.Style></ProgressBar></Grid></Border>
     </Grid>

@@ -53,8 +53,11 @@ public partial class App : System.Windows.Application
             startup.EnableDynamicHost();
         var mediaFiles = new MediaFileService(images);
         var wallpaperManager = new WallpaperManager(new StaticWallpaperEngine(images), new DynamicWallpaperHostClient());
+        var supabase = new SupabaseClientProvider(_paths);
+        var authService = new SupabaseAuthService(supabase);
+        var communityService = new SupabaseCommunityService(supabase, images);
         var viewModel = new MainViewModel(new LibraryDatabase(_paths), images, mediaFiles, wallpaperManager,
-            new SettingsService(_paths), startup);
+            new SettingsService(_paths), startup, authService, communityService);
         _mainWindow = new MainWindow(viewModel);
         _mainWindow.Closing += (_, args) =>
         {

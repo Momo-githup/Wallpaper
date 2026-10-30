@@ -1,5 +1,6 @@
 using WallpaperStudio.App.Models;
 using WallpaperStudio.App.Services;
+using Supabase.Gotrue;
 
 namespace WallpaperStudio.Tests;
 
@@ -80,5 +81,36 @@ public class CoreTests
             Assert.Equal(WallpaperMediaType.Video, loaded.CurrentWallpaperMediaType);
         }
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public void SecureSessionPersistence_EncryptsRoundTripsAndDestroysSession()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "WallpaperStudioTests", Guid.NewGuid().ToString("N"));
+        try
+        {
+            var paths = new AppPaths(root);
+            var persistence = new SecureSessionPersistence(paths);
+            persistence.SaveSession(new Session
+            {
+                AccessToken = "access-token",
+                RefreshToken = "refresh-token",
+                TokenType = "bearer",
+                ExpiresIn = 3600,
+                CreatedAt = DateTime.UtcNow
+            });
+
+            var rawBytes = File.ReadAllBytes(paths.AuthSession);
+            Assert.DoesNotContain("access-token", System.Text.Encoding.UTF8.GetString(rawBytes));
+            Assert.Equal("access-token", persistence.LoadSession()?.AccessToken);
+            Assert.Equal("refresh-token", persistence.LoadSession()?.RefreshToken);
+
+            persistence.DestroySession();
+            Assert.False(File.Exists(paths.AuthSession));
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
     }
 }

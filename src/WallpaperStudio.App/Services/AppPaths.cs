@@ -16,5 +16,6 @@ public sealed class AppPaths
     public string Cache { get; }
     public string Database => Path.Combine(Root, "library.db");
     public string Settings => Path.Combine(Root, "settings.json");
+    public string AuthSession => Path.Combine(Root, "auth-session.dat");
     public string Log => Path.Combine(Root, "app.log");
 }

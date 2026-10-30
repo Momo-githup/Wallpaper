@@ -6,6 +6,9 @@ obj/
 .dotnet-cli/
 TestResults/
 publish/
+.agents/
+skills-lock.json
+supabase/.temp/
 *.user
 *.suo
 *.log
