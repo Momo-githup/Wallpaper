@@ -9,8 +9,7 @@ public sealed class StartupService
 
     public void EnableDynamicHost()
     {
-        var executable = Environment.ProcessPath
-            ?? throw new InvalidOperationException("无法确定程序路径。");
+        var executable = ApplicationExecutable.StableLauncherPath;
         using var key = Registry.CurrentUser.CreateSubKey(RunKey, true);
         key.SetValue(ValueName, $"\"{executable}\" --wallpaper-host", RegistryValueKind.String);
     }

@@ -18,6 +18,9 @@ internal sealed record DynamicHostResponse(bool Success, string? Error = null);
 
 public sealed class DynamicWallpaperHostClient
 {
+    public Task EnsureRunningAsync(CancellationToken cancellationToken = default) =>
+        EnsureHostAsync(cancellationToken);
+
     public async Task ApplyAsync(string path, CancellationToken cancellationToken = default)
     {
         if (!File.Exists(path)) throw new FileNotFoundException("视频文件不存在。", path);
@@ -46,8 +49,7 @@ public sealed class DynamicWallpaperHostClient
     private static async Task EnsureHostAsync(CancellationToken cancellationToken)
     {
         if (await CanConnectAsync(cancellationToken)) return;
-        var executable = Environment.ProcessPath
-            ?? throw new InvalidOperationException("无法确定程序路径。");
+        var executable = ApplicationExecutable.CurrentPath;
         Process.Start(new ProcessStartInfo
         {
             FileName = executable,

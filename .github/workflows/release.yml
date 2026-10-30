@@ -1,0 +1,127 @@
+name: Release Wallpaper Studio
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    runs-on: windows-latest
+    env:
+      VELOPACK_VERSION: 1.2.161
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Read version from tag
+        id: version
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}" -replace '^v', ''
+          if ($version -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$') {
+            throw "标签必须是 SemVer，例如 v1.0.0。"
+          }
+          "value=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Restore
+        run: dotnet restore WallpaperStudio.sln --configfile NuGet.Config --locked-mode
+
+      - name: Test
+        run: dotnet test tests/WallpaperStudio.Tests/WallpaperStudio.Tests.csproj -c Release --no-restore
+
+      - name: Publish win-x64
+        shell: pwsh
+        run: |
+          $output = [System.IO.Path]::GetFullPath("publish/win-x64")
+          dotnet publish src/WallpaperStudio.App/WallpaperStudio.App.csproj `
+            -c Release -r win-x64 --self-contained true --no-restore `
+            -p:Version=${{ steps.version.outputs.value }} `
+            -p:DebugType=None -p:DebugSymbols=false `
+            -o $output
+          if ($LASTEXITCODE -ne 0) { throw "dotnet publish 失败。" }
+
+          foreach ($architecture in @("win-x86", "win-arm64")) {
+            $target = [System.IO.Path]::GetFullPath((Join-Path $output "libvlc/$architecture"))
+            if (-not $target.StartsWith($output + [System.IO.Path]::DirectorySeparatorChar,
+                [System.StringComparison]::OrdinalIgnoreCase)) {
+              throw "发布清理目录越界：$target"
+            }
+            if (Test-Path -LiteralPath $target) {
+              Remove-Item -LiteralPath $target -Recurse -Force
+            }
+          }
+          Get-ChildItem -LiteralPath $output -Filter *.pdb -File -Recurse |
+            Remove-Item -Force
+
+      - name: Setup .NET 10 for Velopack CLI
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Install Velopack CLI
+        run: dotnet tool install --global vpk --version ${{ env.VELOPACK_VERSION }}
+
+      - name: Download previous release for delta generation
+        shell: pwsh
+        run: |
+          $latestTag = gh release list --limit 1 --json tagName --jq ".[0].tagName"
+          $hasVelopackFeed = $false
+          if ($latestTag) {
+            $assets = @(gh release view $latestTag --json assets --jq ".assets[].name")
+            $hasVelopackFeed = $assets -contains "releases.win.json"
+          }
+          if ($hasVelopackFeed) {
+            vpk download github `
+              --repoUrl "https://github.com/${{ github.repository }}" `
+              --token $env:GITHUB_TOKEN `
+              --channel win `
+              --outputDir Releases
+            if ($LASTEXITCODE -ne 0) { throw "下载上一版本更新包失败。" }
+          }
+
+      - name: Build MSI and update packages
+        shell: pwsh
+        run: |
+          vpk pack `
+            --packId WallpaperStudio.Desktop `
+            --packVersion ${{ steps.version.outputs.value }} `
+            --packDir publish/win-x64 `
+            --mainExe WallpaperStudio.App.exe `
+            --packTitle "Wallpaper Studio" `
+            --packAuthors "Momo-githup" `
+            --icon src/WallpaperStudio.App/Assets/WallpaperStudio.ico `
+            --releaseNotes release-notes.md `
+            --shortcuts Desktop,StartMenuRoot `
+            --channel win `
+            --outputDir Releases `
+            --msi `
+            --noPortable `
+            --instLocation Either
+          if ($LASTEXITCODE -ne 0) { throw "Velopack 打包失败。" }
+
+      - name: Publish GitHub Release
+        shell: pwsh
+        run: |
+          vpk upload github `
+            --repoUrl "https://github.com/${{ github.repository }}" `
+            --token $env:GITHUB_TOKEN `
+            --channel win `
+            --outputDir Releases `
+            --publish `
+            --releaseName "Wallpaper Studio ${{ steps.version.outputs.value }}" `
+            --tag "${{ github.ref_name }}" `
+            --targetCommitish "${{ github.sha }}"
+          if ($LASTEXITCODE -ne 0) { throw "GitHub Release 上传失败。" }
