@@ -113,4 +113,34 @@ public class CoreTests
             if (Directory.Exists(root)) Directory.Delete(root, true);
         }
     }
+
+    [Fact]
+    public async Task ImageService_PreparesMp4ForCommunity()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "WallpaperStudioTests", Guid.NewGuid().ToString("N"));
+        try
+        {
+            var paths = new AppPaths(root);
+            var videoPath = Path.Combine(root, "wallpaper.mp4");
+            await File.WriteAllBytesAsync(videoPath,
+            [
+                0, 0, 0, 24, (byte)'f', (byte)'t', (byte)'y', (byte)'p',
+                (byte)'i', (byte)'s', (byte)'o', (byte)'m', 0, 0, 0, 0,
+                (byte)'i', (byte)'s', (byte)'o', (byte)'m', (byte)'m', (byte)'p', (byte)'4', (byte)'2'
+            ]);
+            var wallpaper = new WallpaperItem(1, videoPath, "wallpaper.mp4", 0, 0,
+                new FileInfo(videoPath).Length, DateTime.UtcNow, false, WallpaperMediaType.Video);
+
+            var prepared = await new ImageService(paths).PrepareCommunityFilesAsync(wallpaper);
+
+            Assert.Equal("video/mp4", prepared.MimeType);
+            Assert.Equal(WallpaperMediaType.Video, prepared.MediaType);
+            Assert.Equal(64, prepared.ContentHash.Length);
+            Assert.True(File.Exists(prepared.ThumbnailPath));
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
 }

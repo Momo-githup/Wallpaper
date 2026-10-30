@@ -158,7 +158,9 @@ public sealed partial class MainViewModel : ObservableObject
     private async Task RefreshCommunityAsync() => await LoadCommunityAsync();
 
     private bool CanPublishSelectedWallpaper() =>
-        IsAuthenticated && SelectedWallpaper?.Item.MediaType == WallpaperMediaType.Image;
+        IsAuthenticated && SelectedWallpaper is not null &&
+        (SelectedWallpaper.Item.MediaType == WallpaperMediaType.Image ||
+         Path.GetExtension(SelectedWallpaper.FilePath).Equals(".mp4", StringComparison.OrdinalIgnoreCase));
 
     [RelayCommand(CanExecute = nameof(CanPublishSelectedWallpaper))]
     private async Task PublishSelectedWallpaperAsync()
@@ -195,7 +197,9 @@ public sealed partial class MainViewModel : ObservableObject
         {
             Title = "保存社区壁纸",
             FileName = SelectedCommunityWallpaper.SuggestedFileName,
-            Filter = "图片文件|*.jpg;*.jpeg;*.png;*.webp|所有文件|*.*"
+            Filter = SelectedCommunityWallpaper.IsVideo
+                ? "MP4 视频|*.mp4|所有文件|*.*"
+                : "图片文件|*.jpg;*.jpeg;*.png;*.webp|所有文件|*.*"
         };
         if (dialog.ShowDialog() != true) return;
 
@@ -279,12 +283,24 @@ public sealed partial class MainViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private async Task ImportFilesAsync()
+    private async Task ImportImagesAsync()
     {
         var dialog = new OpenFileDialog
         {
-            Title = "选择壁纸",
-            Filter = "壁纸文件|*.jpg;*.jpeg;*.png;*.bmp;*.webp;*.mp4;*.wmv;*.avi;*.mov;*.m4v|图片|*.jpg;*.jpeg;*.png;*.bmp;*.webp|视频|*.mp4;*.wmv;*.avi;*.mov;*.m4v",
+            Title = "选择图片壁纸",
+            Filter = "图片壁纸|*.jpg;*.jpeg;*.png;*.bmp;*.webp|所有文件|*.*",
+            Multiselect = true
+        };
+        if (dialog.ShowDialog() == true) await ImportPathsAsync(dialog.FileNames);
+    }
+
+    [RelayCommand]
+    private async Task ImportVideosAsync()
+    {
+        var dialog = new OpenFileDialog
+        {
+            Title = "选择视频壁纸",
+            Filter = "视频壁纸|*.mp4;*.wmv;*.avi;*.mov;*.m4v|MP4 视频|*.mp4|所有文件|*.*",
             Multiselect = true
         };
         if (dialog.ShowDialog() == true) await ImportPathsAsync(dialog.FileNames);
@@ -321,7 +337,7 @@ public sealed partial class MainViewModel : ObservableObject
             }
             var added = await _database.AddAsync(valid);
             await ReloadAsync();
-            StatusMessage = added == 0 ? "没有发现新的有效图片" : $"已导入 {added} 张壁纸";
+            StatusMessage = added == 0 ? "没有发现新的有效壁纸" : $"已导入 {added} 个壁纸";
         }
         catch (Exception exception)
         {

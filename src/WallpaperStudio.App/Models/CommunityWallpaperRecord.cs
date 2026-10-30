@@ -36,6 +36,9 @@ public sealed class CommunityWallpaperRecord : BaseModel
     [Column("mime_type")]
     public string MimeType { get; set; } = string.Empty;
 
+    [Column("media_type")]
+    public string MediaType { get; set; } = "image";
+
     [Column("content_hash")]
     public string? ContentHash { get; set; }
 

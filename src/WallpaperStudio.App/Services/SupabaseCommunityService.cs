@@ -45,19 +45,21 @@ public sealed class SupabaseCommunityService : ICommunityService
             wallpaper.Height,
             wallpaper.FileSize,
             wallpaper.MimeType,
+            wallpaper.MediaType == "video" ? WallpaperMediaType.Video : WallpaperMediaType.Image,
             wallpaper.CreatedAt,
             string.Equals(wallpaper.OwnerId, currentUserId, StringComparison.OrdinalIgnoreCase))).ToList();
     }
 
     public async Task PublishAsync(WallpaperItem wallpaper, CancellationToken cancellationToken = default)
     {
-        if (wallpaper.MediaType != WallpaperMediaType.Image)
-            throw new InvalidOperationException("社区第一版暂时只支持发布静态图片。");
+        if (wallpaper.MediaType == WallpaperMediaType.Video &&
+            !Path.GetExtension(wallpaper.FilePath).Equals(".mp4", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("社区动态壁纸仅支持 MP4 格式。");
 
         var client = await GetAuthenticatedClientAsync();
         var userId = client.Auth.CurrentUser?.Id
             ?? throw new InvalidOperationException("登录状态已失效，请重新登录。");
-        var files = await _images.PrepareCommunityFilesAsync(wallpaper.FilePath, cancellationToken);
+        var files = await _images.PrepareCommunityFilesAsync(wallpaper, cancellationToken);
         var publishedResponse = await client.From<CommunityWallpaperRecord>()
             .Select(record => new object[] { record.Id, record.StoragePath, record.ContentHash! })
             .Where(record => record.Status == "published")
@@ -96,6 +98,7 @@ public sealed class SupabaseCommunityService : ICommunityService
                 Height = files.Height,
                 FileSize = files.FileSize,
                 MimeType = files.MimeType,
+                MediaType = files.MediaType == WallpaperMediaType.Video ? "video" : "image",
                 ContentHash = files.ContentHash,
                 Status = "published"
             }, cancellationToken: cancellationToken);

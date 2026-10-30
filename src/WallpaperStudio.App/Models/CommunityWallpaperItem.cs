@@ -11,10 +11,14 @@ public sealed record CommunityWallpaperItem(
     int PixelHeight,
     long FileSize,
     string MimeType,
+    WallpaperMediaType MediaType,
     DateTime CreatedAt,
     bool IsOwnedByCurrentUser)
 {
-    public string Resolution => $"{PixelWidth} × {PixelHeight}";
+    public bool IsVideo => MediaType == WallpaperMediaType.Video;
+    public string MediaGlyph => IsVideo ? "▶" : string.Empty;
+    public string DownloadButtonText => IsVideo ? "下载动态壁纸" : "下载壁纸";
+    public string Resolution => IsVideo ? "动态壁纸" : $"{PixelWidth} × {PixelHeight}";
     public string FileSizeText => FileSize switch
     {
         >= 1024L * 1024 => $"{FileSize / 1024d / 1024:0.##} MB",
@@ -24,6 +28,7 @@ public sealed record CommunityWallpaperItem(
 
     public string SuggestedFileName => $"{SanitizeFileName(Title)}{MimeType switch
     {
+        "video/mp4" => ".mp4",
         "image/png" => ".png",
         "image/webp" => ".webp",
         _ => ".jpg"

@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Windows.Media.Imaging;
 using SkiaSharp;
+using WallpaperStudio.App.Models;
 
 namespace WallpaperStudio.App.Services;
 
@@ -60,7 +61,14 @@ public sealed class ImageService
         return cachePath;
     }
 
-    public async Task<CommunityUploadFiles> PrepareCommunityFilesAsync(string path, CancellationToken cancellationToken = default)
+    public Task<CommunityUploadFiles> PrepareCommunityFilesAsync(WallpaperItem wallpaper,
+        CancellationToken cancellationToken = default) =>
+        wallpaper.MediaType == WallpaperMediaType.Video
+            ? PrepareCommunityVideoFilesAsync(wallpaper.FilePath, cancellationToken)
+            : PrepareCommunityImageFilesAsync(wallpaper.FilePath, cancellationToken);
+
+    private async Task<CommunityUploadFiles> PrepareCommunityImageFilesAsync(string path,
+        CancellationToken cancellationToken)
     {
         if (!File.Exists(path)) throw new FileNotFoundException("图片文件不存在。", path);
         var extension = Path.GetExtension(path).ToLowerInvariant();
@@ -103,7 +111,37 @@ public sealed class ImageService
         var legacyETag = Convert.ToHexString(await MD5.HashDataAsync(content, cancellationToken)).ToLowerInvariant();
 #pragma warning restore CA5351
         return new CommunityUploadFiles(uploadPath, thumbnailPath, extension, mimeType,
-            info.Width, info.Height, info.Size, contentHash, legacyETag);
+            info.Width, info.Height, info.Size, contentHash, legacyETag, WallpaperMediaType.Image);
+    }
+
+    private async Task<CommunityUploadFiles> PrepareCommunityVideoFilesAsync(string path,
+        CancellationToken cancellationToken)
+    {
+        if (!File.Exists(path)) throw new FileNotFoundException("视频文件不存在。", path);
+        if (!Path.GetExtension(path).Equals(".mp4", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("社区动态壁纸仅支持 MP4 格式。");
+        if (!HasMp4Signature(path))
+            throw new InvalidDataException("视频文件不是有效的 MP4 格式。");
+
+        var size = new FileInfo(path).Length;
+        if (size <= 0) throw new InvalidDataException("视频文件为空。");
+        if (size > 50L * 1024 * 1024)
+            throw new InvalidDataException("社区动态壁纸不能超过 50 MB。");
+
+        var thumbnailPath = GetCachePath(path, "community-video", ".jpg");
+        if (!File.Exists(thumbnailPath) || File.GetLastWriteTimeUtc(thumbnailPath) < File.GetLastWriteTimeUtc(path))
+            await Task.Run(() => CreateVideoThumbnail(thumbnailPath), cancellationToken);
+
+        await using var content = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
+            81920, FileOptions.Asynchronous | FileOptions.SequentialScan);
+        var contentHash = Convert.ToHexString(await SHA256.HashDataAsync(content, cancellationToken)).ToLowerInvariant();
+        content.Position = 0;
+#pragma warning disable CA5351 // MD5 is used only to match legacy Storage ETags, not for security.
+        var legacyETag = Convert.ToHexString(await MD5.HashDataAsync(content, cancellationToken)).ToLowerInvariant();
+#pragma warning restore CA5351
+
+        return new CommunityUploadFiles(path, thumbnailPath, ".mp4", "video/mp4",
+            0, 0, size, contentHash, legacyETag, WallpaperMediaType.Video);
     }
 
     public static BitmapImage LoadBitmap(string path)
@@ -156,6 +194,33 @@ public sealed class ImageService
         using var output = File.Create(destination);
         data.SaveTo(output);
     }
+
+    private static void CreateVideoThumbnail(string destination)
+    {
+        using var bitmap = new SKBitmap(480, 270);
+        using var canvas = new SKCanvas(bitmap);
+        canvas.Clear(new SKColor(17, 20, 26));
+        using var circlePaint = new SKPaint { Color = new SKColor(72, 111, 255), IsAntialias = true };
+        canvas.DrawCircle(240, 135, 58, circlePaint);
+        using var playPaint = new SKPaint { Color = SKColors.White, IsAntialias = true };
+        using var playBuilder = new SKPathBuilder();
+        playBuilder.AddPoly([new SKPoint(222, 99), new SKPoint(222, 171), new SKPoint(278, 135)], true);
+        using var playPath = playBuilder.Detach();
+        canvas.DrawPath(playPath, playPaint);
+        using var image = SKImage.FromBitmap(bitmap);
+        using var data = image.Encode(SKEncodedImageFormat.Jpeg, 88);
+        using var output = File.Create(destination);
+        data.SaveTo(output);
+    }
+
+    private static bool HasMp4Signature(string path)
+    {
+        Span<byte> header = stackalloc byte[12];
+        using var stream = File.OpenRead(path);
+        return stream.Read(header) == header.Length &&
+               header[4] == (byte)'f' && header[5] == (byte)'t' &&
+               header[6] == (byte)'y' && header[7] == (byte)'p';
+    }
 }
 
 public sealed record CommunityUploadFiles(
@@ -167,4 +232,5 @@ public sealed record CommunityUploadFiles(
     int Height,
     long FileSize,
     string ContentHash,
-    string LegacyETag);
+    string LegacyETag,
+    WallpaperMediaType MediaType);
