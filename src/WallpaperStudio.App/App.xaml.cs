@@ -63,7 +63,7 @@ public partial class App : System.Windows.Application
         var supabase = new SupabaseClientProvider(_paths);
         var authService = new SupabaseAuthService(supabase);
         var communityService = new SupabaseCommunityService(supabase, images);
-        _updateService = new VelopackUpdateService();
+        _updateService = new GitHubInstallerUpdateService();
         _lifetime = new CancellationTokenSource();
         var viewModel = new MainViewModel(new LibraryDatabase(_paths), images, mediaFiles, wallpaperManager,
             new SettingsService(_paths), startup, authService, communityService);

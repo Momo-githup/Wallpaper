@@ -45,7 +45,7 @@ dotnet test WallpaperStudio.sln --no-restore
 dotnet publish src/WallpaperStudio.App -c Release -r win-x64 --self-contained true -o publish/win-x64
 ```
 
-正式版本使用 Velopack 生成 MSI 安装包并通过 GitHub Releases 提供自动更新。MSI 安装向导允许用户选择安装路径；应用数据始终保存在 `%LOCALAPPDATA%\WallpaperStudio`，不会随程序更新或卸载而删除。
+正式版本使用 Velopack 生成安装负载，并封装为 `WallpaperStudio-Installer-win-x64.exe`。用户可在图形界面中浏览并选择任意可写安装目录。应用数据始终保存在 `%LOCALAPPDATA%\WallpaperStudio`，不会随程序更新或卸载而删除。
 
 发布新版本时，先更新 `release-notes.md`，提交并推送代码，然后创建 SemVer 标签：
 
@@ -54,7 +54,7 @@ git tag v1.0.0
 git push origin v1.0.0
 ```
 
-GitHub Actions 会自动运行测试、发布 `win-x64`、生成 MSI/Setup/增量更新包并创建 Release。普通用户应优先下载 MSI；未安装的调试版和便携版不会检查自动更新。
+GitHub Actions 会自动运行测试、发布 `win-x64`、生成图形化安装器并创建 Release。Release 的自定义 Assets 只包含 `WallpaperStudio-Installer-win-x64.exe`，GitHub 另外自动提供源码 ZIP/TAR。安装版直接检查 GitHub 最新 Release 并下载这个 EXE 完成更新；未安装的调试版和便携版不会检查自动更新。
 
 应用数据保存在 `%LOCALAPPDATA%\WallpaperStudio`。正式分发前建议为可执行文件和安装包配置代码签名。
 

@@ -13,7 +13,7 @@ jobs:
     runs-on: windows-latest
     env:
       VELOPACK_VERSION: 1.2.161
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
       - name: Checkout
@@ -74,25 +74,7 @@ jobs:
       - name: Install Velopack CLI
         run: dotnet tool install --global vpk --version ${{ env.VELOPACK_VERSION }}
 
-      - name: Download previous release for delta generation
-        shell: pwsh
-        run: |
-          $latestTag = gh release list --limit 1 --json tagName --jq ".[0].tagName"
-          $hasVelopackFeed = $false
-          if ($latestTag) {
-            $assets = @(gh release view $latestTag --json assets --jq ".assets[].name")
-            $hasVelopackFeed = $assets -contains "releases.win.json"
-          }
-          if ($hasVelopackFeed) {
-            vpk download github `
-              --repoUrl "https://github.com/${{ github.repository }}" `
-              --token $env:GITHUB_TOKEN `
-              --channel win `
-              --outputDir Releases
-            if ($LASTEXITCODE -ne 0) { throw "下载上一版本更新包失败。" }
-          }
-
-      - name: Build MSI and update packages
+      - name: Build Velopack setup payload
         shell: pwsh
         run: |
           vpk pack `
@@ -107,21 +89,37 @@ jobs:
             --shortcuts Desktop,StartMenuRoot `
             --channel win `
             --outputDir Releases `
-            --msi `
-            --noPortable `
-            --instLocation Either
+            --noPortable
           if ($LASTEXITCODE -ne 0) { throw "Velopack 打包失败。" }
+
+      - name: Build graphical custom-path installer
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem -LiteralPath Releases -Filter "*Setup.exe" -File |
+            Select-Object -First 1
+          if (-not $setup) { throw "没有找到 Velopack Setup.exe。" }
+
+          $installerOutput = [System.IO.Path]::GetFullPath("publish/installer")
+          dotnet publish tools/WallpaperStudio.Installer/WallpaperStudio.Installer.csproj `
+            -c Release -r win-x64 --self-contained true `
+            -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true `
+            -p:DebugType=None -p:DebugSymbols=false `
+            -p:Version=${{ steps.version.outputs.value }} `
+            -p:InstallerPayload="$($setup.FullName)" `
+            -p:RequireInstallerPayload=true `
+            -o $installerOutput
+          if ($LASTEXITCODE -ne 0) { throw "图形化安装程序构建失败。" }
+
+          Copy-Item -LiteralPath (Join-Path $installerOutput "WallpaperStudio-Installer.exe") `
+            -Destination "Releases/WallpaperStudio-Installer-win-x64.exe" -Force
 
       - name: Publish GitHub Release
         shell: pwsh
         run: |
-          vpk upload github `
-            --repoUrl "https://github.com/${{ github.repository }}" `
-            --token $env:GITHUB_TOKEN `
-            --channel win `
-            --outputDir Releases `
-            --publish `
-            --releaseName "Wallpaper Studio ${{ steps.version.outputs.value }}" `
-            --tag "${{ github.ref_name }}" `
-            --targetCommitish "${{ github.sha }}"
+          gh release create "${{ github.ref_name }}" `
+            "Releases/WallpaperStudio-Installer-win-x64.exe" `
+            --repo "${{ github.repository }}" `
+            --title "Wallpaper Studio ${{ steps.version.outputs.value }}" `
+            --notes-file release-notes.md `
+            --verify-tag
           if ($LASTEXITCODE -ne 0) { throw "GitHub Release 上传失败。" }

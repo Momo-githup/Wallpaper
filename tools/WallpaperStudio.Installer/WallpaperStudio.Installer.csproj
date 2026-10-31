@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>WallpaperStudio-Installer</AssemblyName>
+    <RootNamespace>WallpaperStudio.Installer</RootNamespace>
+    <ApplicationIcon>..\..\src\WallpaperStudio.App\Assets\WallpaperStudio.ico</ApplicationIcon>
+    <RestorePackagesWithLockFile>false</RestorePackagesWithLockFile>
+  </PropertyGroup>
+
+  <ItemGroup Condition="Exists('$(InstallerPayload)')">
+    <EmbeddedResource Include="$(InstallerPayload)" LogicalName="WallpaperStudio.Setup.exe" />
+  </ItemGroup>
+
+  <Target Name="ValidateInstallerPayload" BeforeTargets="CoreCompile"
+          Condition="'$(RequireInstallerPayload)' == 'true' And !Exists('$(InstallerPayload)')">
+    <Error Text="没有找到 Velopack Setup 安装程序：$(InstallerPayload)" />
+  </Target>
+
+</Project>
