@@ -9,7 +9,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <StartupObject>WallpaperStudio.App.Program</StartupObject>
     <ApplicationIcon>Assets\WallpaperStudio.ico</ApplicationIcon>
-    <VersionPrefix>1.0.0</VersionPrefix>
+    <VersionPrefix>1.0.4</VersionPrefix>
     <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
   </PropertyGroup>
 
